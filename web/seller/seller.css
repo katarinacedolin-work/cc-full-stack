@@ -1,5 +1,14 @@
 /* ---------- Seller Hub ---------- */
 
+body.seller-locked .desktop-nav,
+body.seller-locked .header-popover-anchor,
+body.seller-locked .messages-nav-button,
+body.seller-locked .profile-nav-button { display: none; }
+
+.seller-locked-state { max-width: 520px; margin: 48px auto; }
+.seller-locked-state h1 { margin: 0 0 8px; font-size: 28px; line-height: 1.2; }
+.seller-locked-state .text-button { margin-top: 8px; }
+
 @media (max-width: 680px) {
   .kpi-grid, .snapshot-grid { grid-template-columns: 1fr 1fr; }
   .trust-banner { align-items: flex-start; flex-direction: column; }

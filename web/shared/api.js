@@ -340,9 +340,9 @@ const api = (() => {
     getStores: async () => {
       try {
         const { stores } = await ccFetch("/stores");
-        return stores.length ? stores : db.stores;
+        return stores;
       } catch {
-        return db.stores;
+        return [];
       }
     },
     /** Services booked from weekly hours also carry `nextOpening` ({ date, time } or null). */
@@ -492,7 +492,7 @@ const api = (() => {
         const { orders } = await ccFetch("/orders?role=buyer");
         return orders;
       } catch {
-        return db.buyer.orders;
+        return [];
       }
     },
 
@@ -617,7 +617,7 @@ const api = (() => {
         const { orders } = await ccFetch("/orders?role=seller");
         return orders;
       } catch {
-        return [...db.seller.orders].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        return [];
       }
     },
 
