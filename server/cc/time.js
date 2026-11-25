@@ -3,7 +3,7 @@
  * whatever time zone the server runs in.
  */
 
-const { TIMEZONE } = require('./listings/mapListing');
+const TIMEZONE = 'America/Los_Angeles';
 
 const partsFormatter = new Intl.DateTimeFormat('en-US', {
   timeZone: TIMEZONE,
@@ -82,6 +82,19 @@ exports.toSlot = value => {
     time: `${hour12}:${pad(p.minute)} ${p.hour < 12 ? 'AM' : 'PM'}`,
   };
 };
+
+const dayFormatter = new Intl.DateTimeFormat('en-US', {
+  timeZone: TIMEZONE,
+  weekday: 'short',
+  month: 'short',
+  day: 'numeric',
+});
+
+/**
+ * @param {Date|string} value
+ * @returns {string} the campus day, such as 'Sat, Nov 28'
+ */
+exports.toDayLabel = value => dayFormatter.format(new Date(value));
 
 /**
  * @param {Date|string} [value] defaults to now

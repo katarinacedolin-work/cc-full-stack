@@ -630,19 +630,30 @@ const api = (() => {
 
     requestReview: () => fail("Campus Connect sends review reminders automatically."),
 
+    /* Selling: tickets at the door */
+
     /** Checks a ticket code at the door. Returns { ok, title, message } and marks a valid ticket used. */
-    scanTicket: (code) => {
-      const value = String(code ?? "").trim().toUpperCase();
-      const ticket = db.buyer.orders.find((order) => order.kind === "ticket" && order.ticketCode === value);
-      if (!ticket) return { ok: false, title: "No ticket found", message: "That code is not a Campus Connect ticket." };
-      const listing = listingOf(ticket);
-      if (listing?.sellerId !== db.seller.id) return { ok: false, title: "Different event", message: `This ticket is for ${listing?.host || listing?.seller || "another event"}.` };
-      if (ticket.ticketStatus === "used") return { ok: false, title: "Already used", message: `${listing.title} was scanned ${timeAgo(ticket.usedAt)}.` };
-      Object.assign(ticket, { ticketStatus: "used", status: "completed", usedAt: now() });
-      const sold = db.seller.orders.find((order) => order.ticketCode === value);
-      if (sold) completeSellerOrder(sold);
-      return { ok: true, title: "Marked used", message: `${listing.title} · ${value}` };
+    scanTicket: (code) => ccFetch("/tickets/scan", { method: "POST", body: { code } }),
+
+    /**
+     * The events the signed-in student can scan tickets for:
+     * [{ listingId, title, when, role: "host" | "helper", sold, used, helpers: [{ userId, name, email }] }].
+     */
+    getDoor: async () => {
+      try {
+        const { events } = await ccFetch("/tickets/door");
+        return events;
+      } catch {
+        return [];
+      }
     },
+
+    /** Lets another student scan tickets for one of the host's events. */
+    addDoorHelper: (listingId, email) =>
+      ccFetch("/tickets/door-helpers", { method: "POST", body: { listingId, email } }),
+
+    removeDoorHelper: (listingId, userId) =>
+      ccFetch(`/tickets/door-helpers/${encodeURIComponent(listingId)}/${encodeURIComponent(userId)}`, { method: "DELETE" }),
 
     /* Selling: messages */
 

@@ -7,5 +7,6 @@
  */
 
 const approveSdsuUsers = require('./handlers/approveSdsuUsers');
+const ticketEvents = require('./handlers/ticketEvents');
 
-module.exports = [approveSdsuUsers];
+module.exports = [approveSdsuUsers, ticketEvents];

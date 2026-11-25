@@ -168,6 +168,7 @@ Object.assign(ACTIONS, {
     showToast("Payment received. Your order is in.");
   },
   "open-order": (target) => setView("order", { selectedOrderId: target.dataset.id }),
+  "refresh-order": () => refresh("orders"),
   "got-it": async (target) => {
     await api.confirmOrderReceived(target.dataset.id);
     await refresh("orders", "notifications");

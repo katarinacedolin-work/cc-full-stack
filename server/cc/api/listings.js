@@ -11,7 +11,25 @@ const {
   openAvailabilityPlan,
 } = require('../listings/mapListing');
 
+const { parseSlot } = require('../time');
+const { eventProblem } = require('../tickets/rules');
+
 const { UUID } = types;
+
+/**
+ * The event form sends the campus date and clock as eventDate and eventTime. Listings keep one
+ * moment instead, eventStartsAt.
+ */
+const withEventStart = fields => {
+  if (!fields.eventDate && !fields.eventTime) return fields;
+  const start = parseSlot(fields.eventDate, fields.eventTime);
+  return { ...fields, eventStartsAt: start ? start.toISOString() : null };
+};
+
+const assertSellableEvent = publicData => {
+  const problem = publicData.kind === 'ticket' ? eventProblem(publicData) : null;
+  if (problem) throw httpError(400, problem.code, problem.message);
+};
 
 const LISTING_INCLUDE = {
   expand: true,
@@ -112,7 +130,10 @@ exports.list = async (req, res) => {
   }
 
   const included = response.data.included || [];
-  let listings = response.data.data.map(listing => toCampusListing(listing, included));
+  // A published listing can't be deleted in Sharetribe. It is closed and marked instead.
+  let listings = response.data.data
+    .filter(listing => !listing.attributes.publicData?.deleted)
+    .map(listing => toCampusListing(listing, included));
 
   // Sellers also see their closed and draft listings. Buyers only get published.
   if (mine && user) {
@@ -163,7 +184,7 @@ exports.show = async (req, res) => {
  */
 exports.create = async (req, res) => {
   const { sdk } = await requireUser(req, res);
-  const fields = req.body || {};
+  const fields = withEventStart(req.body || {});
   if (!String(fields.title || '').trim() || !String(fields.description || '').trim()) {
     throw httpError(400, 'listing-incomplete', 'Add a title and a description.');
   }
@@ -180,6 +201,7 @@ exports.create = async (req, res) => {
   if (kind === 'service') {
     attrs.availabilityPlan = openAvailabilityPlan();
   }
+  assertSellableEvent(attrs.publicData);
 
   try {
     const created = await sdk.ownListings.createDraft({
@@ -213,7 +235,7 @@ exports.create = async (req, res) => {
  */
 exports.update = async (req, res) => {
   const { sdk } = await requireUser(req, res);
-  const fields = req.body || {};
+  const fields = withEventStart(req.body || {});
   const id = asUuid(req.params.id);
   const imageIds = Array.isArray(fields.imageIds)
     ? fields.imageIds.map(imageId => new UUID(imageId))
@@ -231,6 +253,14 @@ exports.update = async (req, res) => {
   const before = toCampusListing(current.listing, current.included);
   const attrs = toSharetribeAttrs({ ...before, ...fields });
   const kind = attrs.publicData.kind;
+  // Pausing or closing an event that is over must still work, so only check a changed event.
+  const eventChanged = ['eventStartsAt', 'venue', 'hostConfirmed'].some(
+    key => attrs.publicData[key] !== (current.listing.attributes.publicData || {})[key]
+  );
+  const goingLive = fields.status === 'active' && before.status !== 'active';
+  if (eventChanged || goingLive) {
+    assertSellableEvent(attrs.publicData);
+  }
 
   const update = { id };
   if ('title' in fields) update.title = attrs.title;
@@ -244,13 +274,20 @@ exports.update = async (req, res) => {
   if (imageIds) update.images = imageIds;
 
   try {
-    if (fields.status === 'active') {
+    const isDraft = before.status === 'draft';
+    if (goingLive && !isDraft) {
       await sdk.ownListings.open({ id });
     }
-    if (fields.status === 'closed' || fields.status === 'paused') {
+    // A draft is not for sale yet, so there is nothing to close.
+    // Sharetribe can't turn a published listing back into a draft, so that pauses it too.
+    const pausing = ['closed', 'paused', 'draft'].includes(fields.status);
+    if (pausing && before.status === 'active') {
       await sdk.ownListings.close({ id });
     }
     await sdk.ownListings.update(update);
+    if (goingLive && isDraft) {
+      await sdk.ownListings.publishDraft({ id });
+    }
 
     const wantsStock = 'quantityAvailable' in fields || 'quantity' in fields;
     if (usesStock(kind) && wantsStock) {
@@ -323,7 +360,13 @@ exports.remove = async (req, res) => {
     if (state === 'draft' || state === 'pendingApproval') {
       await sdk.ownListings.discardDraft({ id });
     } else {
-      await sdk.ownListings.close({ id });
+      if (state === 'published') {
+        await sdk.ownListings.close({ id });
+      }
+      await sdk.ownListings.update({
+        id,
+        publicData: { ...(current.data.data.attributes.publicData || {}), deleted: true },
+      });
     }
     res.json({ ok: true });
   } catch (e) {
@@ -362,7 +405,7 @@ exports.setAwayMode = async (req, res) => {
         id: listing.id,
         publicData: { ...publicData, awayPaused: true },
       });
-    } else if (publicData.awayPaused) {
+    } else if (publicData.awayPaused && !publicData.deleted) {
       await sdk.ownListings.open({ id: listing.id });
       await sdk.ownListings.update({
         id: listing.id,

@@ -83,7 +83,7 @@ describe('toCampusListing', () => {
         { ...listing, attributes: { ...listing.attributes, state: 'closed' } },
         included
       ).status
-    ).toBe('closed');
+    ).toBe('paused');
   });
 });
 
@@ -147,6 +147,63 @@ describe('toSharetribeAttrs', () => {
       unit: 'hour',
       accent: 'sky',
       storeId: 'store-1',
+    });
+  });
+});
+
+describe('ticket listings', () => {
+  const eventFields = {
+    kind: 'ticket',
+    title: 'Open studio night',
+    description: 'Prints, zines and live music.',
+    price: 10,
+    category: 'Create',
+    host: ' VisCom Collective ',
+    venue: ' Art North studio ',
+    // 7:00 PM on the campus clock, during standard time.
+    eventStartsAt: '2026-12-06T03:00:00.000Z',
+    hostConfirmed: true,
+    meeting: 'ignored',
+  };
+
+  it('keeps the event details in public data', () => {
+    expect(toSharetribeAttrs(eventFields).publicData).toMatchObject({
+      kind: 'ticket',
+      category: 'Events',
+      unit: 'ticket',
+      host: 'VisCom Collective',
+      venue: 'Art North studio',
+      eventStartsAt: '2026-12-06T03:00:00.000Z',
+      hostConfirmed: true,
+      meeting: '',
+    });
+  });
+
+  it('shows the event on the campus clock', () => {
+    const attrs = toSharetribeAttrs(eventFields);
+    const event = { ...listing, attributes: { ...listing.attributes, ...attrs } };
+    expect(toCampusListing(event, included)).toMatchObject({
+      kind: 'ticket',
+      host: 'VisCom Collective',
+      date: 'Sat, Dec 5',
+      time: '7:00 PM',
+      eventDate: '2026-12-05',
+      location: 'Art North studio',
+      availability: 'Sat, Dec 5 · 7:00 PM',
+      meeting: 'Art North studio',
+      hostConfirmed: true,
+    });
+  });
+
+  it('keeps the event the same when its mapped form is saved again', () => {
+    const attrs = toSharetribeAttrs(eventFields);
+    const event = { ...listing, attributes: { ...listing.attributes, ...attrs } };
+    const again = toSharetribeAttrs({ ...toCampusListing(event, included), price: 12 });
+    expect(again.publicData).toMatchObject({
+      host: 'VisCom Collective',
+      venue: 'Art North studio',
+      eventStartsAt: '2026-12-06T03:00:00.000Z',
+      hostConfirmed: true,
     });
   });
 });

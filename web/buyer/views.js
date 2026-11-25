@@ -401,26 +401,55 @@ function checkoutView(listing) {
     </section><aside class="summary-card"><div class="summary-visual">${cardThumb(listing.title, listing.accent, listing.emoji)}<div><strong>${escapeHtml(listing.title)}</strong><div class="small muted">${escapeHtml(ticket ? ticketSchedule(listing) : listing.seller)}</div></div></div><div class="summary-line"><span>${ticket ? "Ticket" : service ? "Service" : `Item × ${quantity}`}</span><strong>${money(total)}</strong></div><div class="summary-line total"><span>Total</span><strong>${money(total)}</strong></div><p class="checkout-disclaimer">You pay the listed price. Campus Connect's fee comes out of the seller's payout.</p></aside></div>`;
 }
 
+/** Where a ticket order stands for the buyer: "pending" | "valid" | "used" | "ended" | "cancelled". */
+function ticketState(order) {
+  if (order.status === "cancelled" || order.ticketStatus === "void") return "cancelled";
+  if (order.ticketStatus === "used") return "used";
+  if (order.status === "completed") return "ended";
+  return order.ticketCode ? "valid" : "pending";
+}
+
+const TICKET_STATE = {
+  pending: { label: "Almost ready", heading: "Your ticket is on its way.", note: "Your payment went through. The code shows up here in a moment." },
+  valid: { label: "Valid", heading: "Your ticket is ready.", note: "Show this QR code at the door. One scan marks it used." },
+  used: { label: "Used", heading: "This ticket has been used.", note: "This code will not scan again." },
+  ended: { label: "Event ended", heading: "This event is over.", note: "This ticket was not scanned at the door." },
+  cancelled: { label: "Cancelled", heading: "This ticket was cancelled.", note: "You were refunded in full, and the code no longer works." }
+};
+
 function ticketPass(order, listing) {
-  const used = order.ticketStatus === "used";
-  return `<div class="ticket-pass ${used ? "is-used" : ""}">
+  const stateName = ticketState(order);
+  const copy = TICKET_STATE[stateName];
+  const showCode = order.ticketCode && stateName !== "cancelled";
+  const note = stateName === "used" && order.usedAt ? `Scanned ${escapeHtml(timeAgo(order.usedAt))}. ${copy.note}` : copy.note;
+  return `<div class="ticket-pass ${stateName === "valid" ? "" : "is-used"} ${showCode ? "" : "no-code"}">
     <div class="ticket-pass-copy">
-      <div class="eyebrow">${used ? "Used" : "Valid"}</div>
-      <h2>${escapeHtml(listing?.title || "Ticket")}</h2>
-      <p>${escapeHtml(listing?.availability || "")}${listing?.meeting ? ` · ${escapeHtml(listing.meeting)}` : ""}</p>
-      <p class="ticket-pass-code">${escapeHtml(order.ticketCode)}</p>
-      <p class="muted small">${used ? `Scanned ${escapeHtml(timeAgo(order.usedAt))}. This code will not scan again.` : "Show this QR code at the door. One scan marks it used."}</p>
+      <div class="eyebrow">${copy.label}</div>
+      <h2>${escapeHtml(listing?.title || order.title || "Ticket")}</h2>
+      <p>${escapeHtml(listing ? ticketSchedule(listing) : "")}</p>
+      ${showCode ? `<p class="ticket-pass-code">${escapeHtml(order.ticketCode)}</p>` : ""}
+      <p class="muted small">${note}</p>
     </div>
-    <div class="ticket-pass-qr">${qrSvg(order.ticketCode)}</div>
+    ${showCode ? `<div class="ticket-pass-qr">${qrSvg(order.ticketCode)}</div>` : ""}
   </div>`;
 }
 
 const BUYER_ORDER_STATUS = {
   service: { requested: "Awaiting confirmation", confirmed: "Upcoming", completed: "Completed", cancelled: "Cancelled", disputed: "Problem reported" },
   product: { requested: "Awaiting confirmation", confirmed: "Paid", ready: "Ready for pickup", completed: "Picked up", cancelled: "Cancelled", disputed: "Problem reported" },
-  ticket: { confirmed: "Valid", completed: "Used" },
+  ticket: { confirmed: "Valid", completed: "Used", cancelled: "Cancelled" },
   chore: { paid: "Paid on Campus Connect" }
 };
+/** What the buyer can do with a ticket order, by where it stands. */
+function ticketOrderButtons(order) {
+  const stateName = ticketState(order);
+  const buttons = [];
+  if (stateName === "pending") buttons.push(`<button class="primary-button" data-action="refresh-order">Check again</button>`);
+  if (order.can?.review) buttons.push(`<button class="ghost-button" data-action="open-order-review" data-id="${order.id}">${icon("star")} Leave a review</button>`);
+  if (stateName !== "cancelled") buttons.push(`<button class="ghost-button" data-action="report-order-problem" data-id="${order.id}">Report a problem</button>`);
+  return buttons.join("");
+}
+
 const buyerOrderStatus = (order) => BUYER_ORDER_STATUS[order.kind]?.[order.status] || order.status;
 const buyerOrderWhen = (order) => (order.date ? slotLabel(order) : order.note || "");
 
@@ -434,7 +463,7 @@ function orderView(order) {
   const listing = getListing(order.listingId);
   if (order.kind === "ticket") {
     return `<div class="page-top-row">${backToYou}<button class="ghost-button" data-view="tickets">More tickets</button></div>
-      <div class="order-success ticket-order"><div class="eyebrow">Ticket</div><h1>${order.ticketStatus === "used" ? "This ticket has been used." : "Your ticket is ready."}</h1><p class="lede">${escapeHtml(listing?.seller || "The seller")} scans the code at the door.</p>${ticketPass(order, listing)}</div>`;
+      <div class="order-success ticket-order"><div class="eyebrow">Ticket</div><h1>${TICKET_STATE[ticketState(order)].heading}</h1><p class="lede">${escapeHtml(listing ? ticketHost(listing) : order.seller || "The host")} scans the code at the door.</p>${ticketPass(order, listing)}<div class="button-row ticket-order-actions">${ticketOrderButtons(order)}</div></div>`;
   }
   const service = order.kind === "service";
   const cancelled = order.status === "cancelled";
@@ -888,7 +917,7 @@ function ticketsView() {
   const owned = mine.length
     ? `<section class="section"><div class="section-header"><h2>Your tickets</h2></div><div class="activity-list">${mine.map((order) => {
       const listing = getListing(order.listingId);
-      return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${listing?.accent || "coral"}">${listing?.emoji || "🎟️"}</span><span><span class="activity-title">${escapeHtml(listing?.title || "Ticket")}</span><span class="activity-sub">${order.ticketStatus === "used" ? "Used" : "Show QR code"} · ${escapeHtml(order.ticketCode)}</span></span></span>${icon("chevron-right")}</button>`;
+      return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${listing?.accent || "coral"}">${listing?.emoji || "🎟️"}</span><span><span class="activity-title">${escapeHtml(listing?.title || "Ticket")}</span><span class="activity-sub">${escapeHtml([ticketState(order) === "valid" ? "Show QR code" : TICKET_STATE[ticketState(order)].label, order.ticketCode].filter(Boolean).join(" · "))}</span></span></span>${icon("chevron-right")}</button>`;
     }).join("")}</div></section>`
     : "";
   return `<div class="tickets-layout">
@@ -1216,7 +1245,8 @@ function sellView() {
       <h2>Choose what you are listing.</h2>
       <div class="sell-options">
         ${sellOption("service", "coral", "🗓️", "A service", "Something someone books time for")}
-        ${sellOption("product", "butter", "📦", "A product", "Something someone buys for pickup or delivery")}
+        ${sellOption("product", "butter", "📦", "A product", "Something someone buys for pickup")}
+        ${sellOption("ticket", "lilac", "🎟️", "Tickets to an event", "For an event you are hosting. Buyers get a code you scan at the door")}
       </div>
       ${state.sellKind === "product" ? sellProductTypeChooser() : ""}
       ${form}
@@ -1232,7 +1262,35 @@ function sellProductTypeChooser() {
 
 const optionTags = (values) => values.map((value) => `<option>${value}</option>`).join("");
 
+/** Today on the campus calendar, as YYYY-MM-DD. */
+const campusToday = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Los_Angeles" });
+
+function sellTicketForm() {
+  const submitButtons = IS_SELLER
+    ? `<button class="primary-button" type="submit" name="intent" value="publish">Put tickets on sale ${icon("arrow")}</button><button class="ghost-button" type="button" data-view="seller-listings">Cancel</button>`
+    : `<button class="primary-button" type="submit">Put tickets on sale ${icon("arrow")}</button><button class="ghost-button" type="button" data-action="cancel-sell">Cancel</button>`;
+  return `<form class="form-card" data-form="publish-listing">
+    <div class="progress-steps"><span class="progress-step active"></span><span class="progress-step active"></span></div>
+    <div class="eyebrow">Step 2 of 2 · Event details</div>
+    <h3>Tell people what they are coming to.</h3>
+    <p class="muted small">Each ticket is one order with its own code. You scan it at the door, and that is when you are paid. A ticket that is never scanned still pays you a few hours after the event starts.</p>
+    <div class="form-grid">
+      <div class="field full"><label for="listing-title">Event name</label><input id="listing-title" name="title" required maxlength="70" placeholder="e.g. Open studio night" /></div>
+      <div class="field"><label for="listing-event-date">Date</label><input id="listing-event-date" name="eventDate" type="date" required min="${campusToday()}" /></div>
+      <div class="field"><label for="listing-event-time">Start time</label><input id="listing-event-time" name="eventTime" type="time" required /><span class="field-note">San Diego time.</span></div>
+      <div class="field"><label for="listing-venue">Where it is</label><input id="listing-venue" name="venue" required maxlength="80" placeholder="e.g. Art North studio" /></div>
+      <div class="field"><label for="listing-host">Hosted by</label><input id="listing-host" name="host" maxlength="60" placeholder="Your club or organization" /><span class="field-note">Leave it empty to show your own name.</span></div>
+      <div class="field"><label for="listing-price">Price per ticket</label><input id="listing-price" name="price" type="number" min="1" step="0.5" required placeholder="10" /></div>
+      <div class="field"><label for="listing-quantity">Tickets for sale</label><input id="listing-quantity" name="quantity" type="number" min="1" required value="50" /></div>
+      <div class="field full"><label for="listing-description">Description</label><textarea id="listing-description" name="description" required placeholder="What is happening, who it is for and what to bring."></textarea></div>
+      <div class="field full"><label class="check-row" for="listing-host-confirmed"><input id="listing-host-confirmed" name="hostConfirmed" type="checkbox" value="yes" required /> <span>I am hosting this event, or I sell its tickets for the host.</span></label><span class="field-note">Reselling a ticket you bought somewhere else is not allowed here. Use the ticket chat for that.</span></div>
+    </div>
+    <div class="button-row form-actions">${submitButtons}</div>
+  </form>`;
+}
+
 function sellForm(kind) {
+  if (kind === "ticket") return sellTicketForm();
   const service = kind === "service";
   const isNewProduct = !service && state.sellMerchandiseType === "new";
   const categories = service

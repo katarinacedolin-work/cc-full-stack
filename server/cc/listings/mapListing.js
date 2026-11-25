@@ -4,9 +4,14 @@
  */
 
 const { types } = require('sharetribe-flex-sdk');
+const { TIMEZONE, toSlot, toDayLabel } = require('../time');
+
 const { Money } = types;
 
 const MONEY_DIVISOR = 100; // USD cents
+
+const DEFAULT_ACCENT = { product: 'butter', service: 'lilac', ticket: 'coral' };
+const DEFAULT_EMOJI = { product: '📦', service: '✨', ticket: '🎟️' };
 
 // Which Sharetribe transaction process each kind of listing is sold through.
 const PROCESS_ALIAS = {
@@ -19,7 +24,27 @@ const PROCESS_ALIAS = {
 // is for one whole session, so its unit is 'fixed' rather than 'hour'.
 const UNIT_TYPE = { product: 'item', service: 'fixed', ticket: 'item' };
 
-const TIMEZONE = 'America/Los_Angeles';
+// What the pages show for a ticket listing: who hosts the event, when and where.
+const eventFields = publicData => {
+  const startsAt = publicData.eventStartsAt || null;
+  const slot = startsAt ? toSlot(startsAt) : null;
+  const date = startsAt ? toDayLabel(startsAt) : '';
+  const time = slot ? slot.time : '';
+  const venue = publicData.venue || '';
+  return {
+    eventStartsAt: startsAt,
+    // The date and clock in the form the event form's inputs take.
+    eventDate: slot ? slot.date : '',
+    host: publicData.host || '',
+    date,
+    time,
+    location: venue,
+    venue,
+    hostConfirmed: Boolean(publicData.hostConfirmed),
+    availability: [date, time].filter(Boolean).join(' · '),
+    meeting: venue,
+  };
+};
 
 /**
  * A plan that leaves every hour of the week open. Service listings get it when they are
@@ -49,7 +74,8 @@ const stockFrom = (listing, included = []) => {
 
 const statusFromSharetribe = state => {
   if (state === 'published') return 'active';
-  if (state === 'closed') return 'closed';
+  // The pages call a listing that is closed to buyers "paused".
+  if (state === 'closed') return 'paused';
   if (state === 'draft' || state === 'pendingApproval') return 'draft';
   return state || 'draft';
 };
@@ -119,7 +145,9 @@ exports.toCampusListing = (listing, included = []) => {
     title: attrs.title || '',
     description: attrs.description || '',
     price,
-    unit: publicData.unit || (publicData.kind === 'service' ? 'hour' : 'each'),
+    unit:
+      publicData.unit ||
+      (publicData.kind === 'service' ? 'hour' : publicData.kind === 'ticket' ? 'ticket' : 'each'),
     seller: sellerName,
     initials: initialsOf(sellerName),
     sellerId: author?.id?.uuid || '',
@@ -131,7 +159,7 @@ exports.toCampusListing = (listing, included = []) => {
     verified: true,
     status: statusFromSharetribe(attrs.state),
     accent: publicData.accent || 'cobalt',
-    emoji: publicData.emoji || (publicData.kind === 'service' ? '✨' : '📦'),
+    emoji: publicData.emoji || DEFAULT_EMOJI[publicData.kind] || DEFAULT_EMOJI.product,
     meeting: publicData.meeting || '',
     availability: publicData.availability || '',
     merchandiseType: publicData.merchandiseType || null,
@@ -148,13 +176,7 @@ exports.toCampusListing = (listing, included = []) => {
     images,
     photo: images[0] || null,
     listingType: attrs.publicData?.listingType || publicData.listingType || null,
-    ...(publicData.kind === 'ticket'
-      ? {
-          eventStartsAt: publicData.eventStartsAt || null,
-          venue: publicData.venue || '',
-          hostConfirmed: Boolean(publicData.hostConfirmed),
-        }
-      : {}),
+    ...(publicData.kind === 'ticket' ? eventFields(publicData) : {}),
   };
 };
 
@@ -173,11 +195,14 @@ exports.toSharetribeAttrs = (fields, { currency = 'USD' } = {}) => {
   const publicData = {
     kind,
     category: fields.category || 'Other',
-    unit: fields.unit || (kind === 'service' ? fields.duration || 'hour' : 'each'),
-    accent: fields.accent || (kind === 'service' ? 'lilac' : 'butter'),
-    emoji: fields.emoji || (kind === 'service' ? '✨' : '📦'),
-    meeting: fields.meeting || '',
-    availability: fields.availability || '',
+    unit:
+      fields.unit ||
+      (kind === 'service' ? fields.duration || 'hour' : kind === 'ticket' ? 'ticket' : 'each'),
+    accent: fields.accent || DEFAULT_ACCENT[kind],
+    emoji: fields.emoji || DEFAULT_EMOJI[kind],
+    // For a ticket these two are worked out from the event's time and place when it is read.
+    meeting: kind === 'ticket' ? '' : fields.meeting || '',
+    availability: kind === 'ticket' ? '' : fields.availability || '',
     storeId: fields.storeId || null,
     collection: fields.collection || null,
     listingType: fields.listingType || kind,
@@ -198,8 +223,10 @@ exports.toSharetribeAttrs = (fields, { currency = 'USD' } = {}) => {
     publicData.duration = fields.duration || fields.unit || 'hour';
   }
   if (kind === 'ticket') {
+    publicData.category = 'Events';
     publicData.eventStartsAt = fields.eventStartsAt || null;
-    publicData.venue = fields.venue || '';
+    publicData.venue = String(fields.venue || '').trim();
+    publicData.host = String(fields.host || '').trim();
     publicData.hostConfirmed = Boolean(fields.hostConfirmed);
   }
 

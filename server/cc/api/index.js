@@ -15,6 +15,7 @@ const stores = require('./stores');
 const orders = require('./orders');
 const config = require('./config');
 const payouts = require('./payouts');
+const tickets = require('./tickets');
 
 const router = express.Router();
 
@@ -64,6 +65,13 @@ router.post('/orders/:id/ready-for-pickup', asyncHandler(orders.readyForPickup))
 router.post('/orders/:id/actions/:action', asyncHandler(orders.action));
 router.post('/orders/:id/operator/:action', asyncHandler(orders.operatorAction));
 router.get('/payouts', asyncHandler(payouts.getPayouts));
+
+// ================ Tickets ================ //
+
+router.post('/tickets/scan', asyncHandler(tickets.scan));
+router.get('/tickets/door', asyncHandler(tickets.door));
+router.post('/tickets/door-helpers', asyncHandler(tickets.addHelper));
+router.delete('/tickets/door-helpers/:listingId/:userId', asyncHandler(tickets.removeHelper));
 
 // ================ Fallbacks ================ //
 

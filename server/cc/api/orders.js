@@ -17,6 +17,11 @@ const log = require('../../log');
 const db = require('../db');
 const { parseSlot, durationMinutes } = require('../time');
 const { toCampusOrder, BOOKING_PROCESS, PURCHASE_PROCESS } = require('../orders/mapOrder');
+const { eventProblem } = require('../tickets/rules');
+const { issueFor } = require('../tickets/complete');
+const ticketStore = require('../tickets/store');
+
+const TICKET_PROCESS = 'cc-ticket';
 
 const { UUID } = types;
 
@@ -66,6 +71,31 @@ const getFlagsOrNone = transactionId =>
     log.error(e, 'cc-order-flags-failed');
     return {};
   });
+
+const isTicketOrder = tx => (tx.attributes?.processName || '').split('/')[0] === TICKET_PROCESS;
+
+// What the pages may know about an order's ticket. Only the buyer gets the code.
+const ticketView = (row, tx, userId) => {
+  if (!row) return null;
+  const isBuyer = tx.relationships?.customer?.data?.id?.uuid === userId;
+  return { status: row.status, usedAt: row.used_at, ...(isBuyer ? { code: row.code } : {}) };
+};
+
+const ticketsFor = async transactions => {
+  const ids = transactions.filter(isTicketOrder).map(tx => tx.id.uuid);
+  try {
+    return await ticketStore.findByTransactions(ids);
+  } catch (e) {
+    log.error(e, 'cc-order-tickets-failed');
+    return new Map();
+  }
+};
+
+// Everything about one order that lives in Postgres rather than in Sharetribe.
+const extrasFor = async (tx, userId) => {
+  const [flags, tickets] = await Promise.all([getFlagsOrNone(tx.id.uuid), ticketsFor([tx])]);
+  return { ...flags, ticket: ticketView(tickets.get(tx.id.uuid), tx, userId) };
+};
 
 const setReadyFlag = async (transactionId, ready) => {
   await db.query(
@@ -138,8 +168,16 @@ exports.list = async (req, res) => {
   const transactions = response.data.data.filter(
     tx => !NOT_AN_ORDER.test(tx.attributes.lastTransition || '')
   );
-  const flags = await getFlagsFor(transactions.map(tx => tx.id.uuid));
-  const orders = transactions.map(tx => toCampusOrder(tx, included, flags.get(tx.id.uuid)));
+  const [flags, tickets] = await Promise.all([
+    getFlagsFor(transactions.map(tx => tx.id.uuid)),
+    ticketsFor(transactions),
+  ]);
+  const orders = transactions.map(tx =>
+    toCampusOrder(tx, included, {
+      ...flags.get(tx.id.uuid),
+      ticket: ticketView(tickets.get(tx.id.uuid), tx, user.id.uuid),
+    })
+  );
   orders.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
   res.json({ orders });
 };
@@ -152,8 +190,8 @@ exports.show = async (req, res) => {
   try {
     const { tx, included } = await loadTransaction(sdk, req.params.id);
     assertParticipant(tx, user.id.uuid, 'either');
-    const flags = await getFlagsOrNone(tx.id.uuid);
-    res.json({ order: toCampusOrder(tx, included, flags) });
+    const extras = await extrasFor(tx, user.id.uuid);
+    res.json({ order: toCampusOrder(tx, included, extras) });
   } catch (e) {
     if (e.status && e.code) throw e;
     throw httpError(404, 'order-not-found', 'That order is no longer here.');
@@ -186,6 +224,18 @@ exports.create = async (req, res) => {
   if (kind === 'service' && !(date && time)) {
     throw httpError(400, 'slot-required', 'Pick a time first.');
   }
+  if (kind === 'ticket') {
+    const problem = eventProblem(listing.attributes.publicData);
+    if (problem) {
+      throw httpError(
+        400,
+        'tickets-not-on-sale',
+        problem.code === 'event-started'
+          ? 'Ticket sales for this event have ended.'
+          : 'Tickets for this event are not on sale right now.'
+      );
+    }
+  }
 
   const orderData = { currency };
   const params = {
@@ -202,7 +252,9 @@ exports.create = async (req, res) => {
       start.getTime() + durationMinutes(listing.attributes.publicData) * 60 * 1000
     );
   } else {
-    params.stockReservationQuantity = Math.max(1, Math.floor(Number(quantity)) || 1);
+    // A ticket order is for one ticket, so each ticket has its own code.
+    params.stockReservationQuantity =
+      kind === 'ticket' ? 1 : Math.max(1, Math.floor(Number(quantity)) || 1);
     orderData.stockReservationQuantity = params.stockReservationQuantity;
   }
 
@@ -271,8 +323,23 @@ exports.confirmPayment = async (req, res) => {
       },
       TX_INCLUDE
     );
+    const confirmed = response.data.data;
+    const included = response.data.included || [];
+
+    let ticket = null;
+    if (isTicketOrder(confirmed)) {
+      try {
+        ticket = await issueFor(confirmed, included);
+      } catch (issueError) {
+        // The buyer has paid. The worker issues the ticket from Sharetribe's event feed.
+        log.error(issueError, 'cc-ticket-issue-failed', { transactionId: confirmed.id.uuid });
+      }
+    }
+
     res.json({
-      order: toCampusOrder(response.data.data, response.data.included || []),
+      order: toCampusOrder(confirmed, included, {
+        ticket: ticketView(ticket, confirmed, user.id.uuid),
+      }),
     });
   } catch (e) {
     throw httpError(
@@ -400,8 +467,8 @@ exports.action = async (req, res) => {
       { id: tx.id, transition, params },
       TX_INCLUDE
     );
-    const flags = await getFlagsOrNone(tx.id.uuid);
-    res.json({ order: toCampusOrder(response.data.data, response.data.included || [], flags) });
+    const extras = await extrasFor(response.data.data, user.id.uuid);
+    res.json({ order: toCampusOrder(response.data.data, response.data.included || [], extras) });
   } catch (e) {
     throw httpError(
       e.status || 400,
@@ -457,9 +524,12 @@ exports.operatorAction = async (req, res) => {
 
   const processName = (tx.attributes.processName || '').split('/')[0];
   const action = req.params.action;
+  const isTicket = processName === TICKET_PROCESS;
   let transition;
   if (action === 'cancel') {
     transition = 'transition/cancel';
+  } else if (action === 'complete' && isTicket) {
+    throw httpError(400, 'scan-to-complete', 'A ticket is completed by scanning it at the door.');
   } else if (action === 'complete') {
     transition =
       processName === BOOKING_PROCESS
@@ -472,6 +542,20 @@ exports.operatorAction = async (req, res) => {
   const reason = String(req.body?.reason || '').trim();
   const message = String(req.body?.message || '').trim();
 
+  // The code stops working before the refund starts, so a cancelled ticket can't be scanned
+  // in between.
+  let voided = null;
+  if (isTicket) {
+    voided = await ticketStore.voidUnused(tx.id.uuid);
+    if (voided === 'used') {
+      throw httpError(
+        409,
+        'ticket-used',
+        'This ticket was already scanned at the door, so it can no longer be refunded here.'
+      );
+    }
+  }
+
   try {
     const integrationSdk = getIntegrationSdk();
     await integrationSdk.transactions.transition({
@@ -483,6 +567,10 @@ exports.operatorAction = async (req, res) => {
           : {},
     });
   } catch (e) {
+    if (voided === 'voided') {
+      // The refund did not happen, so the ticket is good again.
+      await ticketStore.restore(tx.id.uuid);
+    }
     throw httpError(
       e.status || 400,
       'operator-action-failed',
@@ -499,8 +587,8 @@ exports.operatorAction = async (req, res) => {
   }
 
   const refreshed = await loadTransaction(sdk, req.params.id);
-  const flags = await getFlagsOrNone(req.params.id);
-  res.json({ order: toCampusOrder(refreshed.tx, refreshed.included, flags) });
+  const extras = await extrasFor(refreshed.tx, user.id.uuid);
+  res.json({ order: toCampusOrder(refreshed.tx, refreshed.included, extras) });
 };
 
 /**
@@ -530,7 +618,8 @@ exports.lineItems = async (req, res) => {
       start.getTime() + durationMinutes(listing.attributes.publicData) * 60 * 1000
     );
   } else {
-    orderData.stockReservationQuantity = Math.max(1, Math.floor(Number(quantity)) || 1);
+    orderData.stockReservationQuantity =
+      kind === 'ticket' ? 1 : Math.max(1, Math.floor(Number(quantity)) || 1);
   }
 
   // The helper adds each line's total, which Sharetribe otherwise only adds once the order exists.

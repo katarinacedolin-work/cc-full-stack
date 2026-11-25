@@ -34,6 +34,14 @@ function previewReadOnly() {
   showToast(PREVIEW_TOAST);
 }
 
+/** "7:00 PM" as "19:00", the form a time input takes. */
+function clock24(label) {
+  const [, hour, minute, meridiem] = String(label || "").match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i) || [];
+  if (!hour) return "";
+  const hours = (Number(hour) % 12) + (meridiem.toUpperCase() === "PM" ? 12 : 0);
+  return `${String(hours).padStart(2, "0")}:${minute}`;
+}
+
 function openListingEditor(id) {
   const listing = getListing(id);
   if (!listing) return;
@@ -54,7 +62,12 @@ function openListingEditor(id) {
     condition: listing.condition || "New",
     status: listingStatus(listing) === "soldout" ? "active" : listingStatus(listing),
     emoji: listing.emoji,
-    accent: listing.accent
+    accent: listing.accent,
+    /* Events only. */
+    eventDate: listing.eventDate || "",
+    eventTime: clock24(listing.time),
+    venue: listing.venue || listing.location || "",
+    host: listing.host || ""
   };
   setView("seller-listing-edit");
 }
@@ -114,6 +127,7 @@ function cloneScheduleDays() {
 }
 
 let ticketScanStream = null;
+let lastScan = { code: "", at: 0 };
 
 function stopTicketScan() {
   ticketScanStream?.getTracks().forEach((track) => track.stop());
@@ -121,43 +135,56 @@ function stopTicketScan() {
 }
 
 async function applyScan(code) {
-  const result = await api.scanTicket(code);
-  state.seller.scanResult = result;
-  stopTicketScan();
-  await refresh("sellerOrders", "payouts", "orders", "listings");
-  showToast(result.ok ? "Ticket marked used." : result.title, result.ok ? "success" : "error");
-  render();
+  lastScan = { code: String(code), at: Date.now() };
+  try {
+    state.seller.scanResult = await api.scanTicket(code);
+    const result = state.seller.scanResult;
+    await refresh("sellerOrders", "door");
+    showToast(result.ok ? "Ticket marked used." : result.title, result.ok ? "success" : "error");
+  } finally {
+    /* The page was drawn again, so the camera needs its new video element. It stays on for the next person in line. */
+    if (ticketScanStream) watchTicketCamera();
+  }
+}
+
+/** Shows the running camera on the page and reads QR codes from it until one is found. */
+async function watchTicketCamera() {
+  const video = document.querySelector("#ticket-scan-video");
+  const note = document.querySelector("#ticket-scan-note");
+  if (!video || !ticketScanStream) return;
+  video.srcObject = ticketScanStream;
+  video.hidden = false;
+  await video.play().catch(() => {});
+  if (!("BarcodeDetector" in window)) {
+    if (note) note.textContent = "Camera is on, but this browser cannot read QR codes. Enter the code under the buyer's QR.";
+    return;
+  }
+  if (note) note.textContent = "Point the camera at the buyer's QR code.";
+  const detector = new BarcodeDetector({ formats: ["qr_code"] });
+  const watch = async () => {
+    if (!ticketScanStream || state.view !== "seller-scan" || !video.isConnected) return;
+    try {
+      const codes = await detector.detect(video);
+      const value = codes[0]?.rawValue;
+      /* A code still in front of the camera is not scanned again right away. */
+      const repeat = value === lastScan.code && Date.now() - lastScan.at < 4000;
+      if (value && !repeat) return run(() => applyScan(value));
+    } catch { /* keep watching */ }
+    requestAnimationFrame(watch);
+  };
+  watch();
 }
 
 async function startTicketCamera() {
-  const video = document.querySelector("#ticket-scan-video");
   const note = document.querySelector("#ticket-scan-note");
-  if (!video || !navigator.mediaDevices?.getUserMedia) {
+  if (!navigator.mediaDevices?.getUserMedia) {
     if (note) note.textContent = "This browser cannot open the camera. Enter the code under the QR instead.";
     return;
   }
   try {
     stopTicketScan();
     ticketScanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
-    video.srcObject = ticketScanStream;
-    video.hidden = false;
-    await video.play();
-    if (!("BarcodeDetector" in window)) {
-      if (note) note.textContent = "Camera is on, but this browser cannot read QR codes. Enter the code under the buyer's QR.";
-      return;
-    }
-    const detector = new BarcodeDetector({ formats: ["qr_code"] });
-    const watch = async () => {
-      if (!ticketScanStream || state.view !== "seller-scan") return;
-      try {
-        const codes = await detector.detect(video);
-        const value = codes[0]?.rawValue;
-        if (value) return applyScan(value);
-      } catch { /* keep watching */ }
-      requestAnimationFrame(watch);
-    };
-    watch();
-    if (note) note.textContent = "Point the camera at the buyer's QR code.";
+    await watchTicketCamera();
   } catch {
     if (note) note.textContent = "Camera permission was blocked. Enter the code under the QR instead.";
   }
@@ -331,6 +358,13 @@ Object.assign(ACTIONS, {
   },
 
   "seller-start-scan": () => startTicketCamera(),
+  "seller-open-door-helper": sellerUpdate((target) => ({ doorEventId: target.dataset.id })),
+  "seller-close-door-helper": sellerUpdate(() => ({ doorEventId: null })),
+  "seller-remove-door-helper": async (target) => {
+    await api.removeDoorHelper(target.dataset.listing, target.dataset.user);
+    await refresh("door");
+    showToast("They can no longer scan tickets for this event.");
+  },
 
   "seller-set-inbox-filter": sellerUpdate((target) => ({ inboxFilter: target.dataset.filter })),
 
@@ -511,6 +545,7 @@ Object.assign(FORMS, {
       showToast("Your service is live. Weekly hours control when buyers can book.");
       return;
     }
+    if (listing.kind === "ticket") await load("door");
     state.seller.listingsTab = fields.intent === "draft" ? "draft" : "all";
     setView("seller-listings");
     showToast(fields.intent === "draft" ? "Saved as a draft. Only you can see it." : `${listing.title} is live.`);
@@ -520,24 +555,22 @@ Object.assign(FORMS, {
     const id = state.seller.editListingId;
     const draft = state.seller.draft;
     if (!id || !draft) return;
-    await api.updateListing(id, {
+    const shared = {
       title: draft.title,
-      category: draft.category,
       price: draft.price,
-      unit: draft.unit,
       description: draft.description,
-      meeting: draft.meeting,
       emoji: draft.emoji,
       accent: draft.accent,
       status: draft.status,
-      quantityAvailable: draft.quantityAvailable,
-      condition: draft.condition,
-      availability: draft.availability,
       collection: draft.collection
-    });
+    };
+    const byKind = getListing(id)?.kind === "ticket"
+      ? { eventDate: draft.eventDate, eventTime: draft.eventTime, venue: draft.venue, host: draft.host, quantityAvailable: draft.quantityAvailable }
+      : { category: draft.category, unit: draft.unit, meeting: draft.meeting, quantityAvailable: draft.quantityAvailable, condition: draft.condition, availability: draft.availability };
+    await api.updateListing(id, { ...shared, ...byKind });
     state.seller.draft = null;
     state.seller.editListingId = null;
-    await refresh("listings");
+    await refresh("listings", "door");
     setView("seller-listings");
     showToast("Listing saved.");
   },
@@ -594,6 +627,13 @@ Object.assign(FORMS, {
 
   "seller-scan-code": async (fields) => {
     await applyScan(fields.code);
+  },
+
+  "seller-add-door-helper": async (fields, form) => {
+    await api.addDoorHelper(form.dataset.listing, fields.email);
+    state.seller.doorEventId = null;
+    await refresh("door");
+    showToast("Added. They can scan tickets for this event from Seller Hub.");
   },
 
   "seller-withdraw": async () => {
