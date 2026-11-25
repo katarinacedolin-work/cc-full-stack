@@ -32,6 +32,9 @@ const stripeRelatedStatesForDigitalDownload = [
   'state/reported',
 ];
 
+// Campus Connect's ticket process (ext/transaction-processes/cc-ticket)
+const stripeRelatedStatesForTickets = ['state/pending-payment', 'state/purchased'];
+
 const HAS_INCOMPLETE_TRANSACTIONS =
   'User has transactions on states that include incomplete payment processing';
 
@@ -69,8 +72,15 @@ module.exports = (req, res) => {
       states: stripeRelatedStatesForDigitalDownload.join(','),
     });
 
+  const ongoingTicketsWithIncompletePaymentProcessing = () =>
+    sdk.transactions.query({
+      processNames: 'cc-ticket',
+      states: stripeRelatedStatesForTickets.join(','),
+    });
+
   // Check for any states that may contain incomplete Stripe actions
   Promise.all([
+    ongoingTicketsWithIncompletePaymentProcessing(),
     ongoingBookingsWithIncompletePaymentProcessing(),
     ongoingPurchasesWithIncompletePaymentProcessing(),
     ongoingNegotiationsWithIncompletePaymentProcessing(),

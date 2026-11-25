@@ -33,6 +33,7 @@ const data = {
 
   /* The seller's account. */
   sellerOrders: [],
+  door: [],
   listingStats: {},
   analytics: { days: [], sources: [], ratings: {} },
   reviews: [],
@@ -61,6 +62,7 @@ const LOADERS = {
   paymentMethods: api.getPaymentMethods,
   orders: api.getOrders,
   sellerOrders: api.getSellerOrders,
+  door: api.getDoor,
   listingStats: api.getListingStats,
   analytics: api.getAnalytics,
   reviews: api.getReviews,
@@ -73,7 +75,7 @@ const LOADERS = {
 /** What each page fetches when it opens. */
 const SHARED_DATA = ["session", "categories", "listings", "sellers", "stores", "conversations", "notifications"];
 const BUYER_DATA = [...SHARED_DATA, "schoolServices", "agents", "apartments", "jobs", "housing", "chores", "ticketPosts", "account", "paymentMethods", "orders"];
-const SELLER_DATA = [...SHARED_DATA, "sellerOrders", "listingStats", "analytics", "reviews", "sellerSettings", "schedule", "calendar", "payouts"];
+const SELLER_DATA = [...SHARED_DATA, "sellerOrders", "door", "listingStats", "analytics", "reviews", "sellerSettings", "schedule", "calendar", "payouts"];
 
 /** Fetches the named parts of `data` again: `await load("listings", "stores")`. */
 async function load(...keys) {
@@ -158,6 +160,7 @@ const state = {
     profileSection: "public",
     reviewsFilter: "all",
     scanResult: null,
+    doorEventId: null,
     hoursPreview: null,
     scheduleCopy: null
   }

@@ -707,6 +707,10 @@
 .ticket-pass-qr { display: grid; place-items: center; padding: 8px; border-radius: 12px; background: #fff; }
 .ticket-qr { width: 148px; height: 148px; fill: var(--ink); }
 .ticket-pass.is-used { opacity: .72; }
+.ticket-pass.no-code { grid-template-columns: 1fr; }
+.ticket-order-actions { justify-content: center; margin-top: 18px; }
+.field .check-row { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; font-weight: 600; cursor: pointer; }
+.field .check-row input { flex: none; width: 18px; height: 18px; min-height: 0; margin: 2px 0 0; padding: 0; }
 .ticket-pass.is-used .ticket-qr { fill: var(--muted); }
 @media (max-width: 800px) {
   .ticket-pass { grid-template-columns: 1fr; }

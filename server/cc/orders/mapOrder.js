@@ -85,7 +85,9 @@ const moneyAmount = money => (money && typeof money.amount === 'number' ? money.
 /**
  * @param {Object} tx Sharetribe transaction
  * @param {Array} [included]
- * @param {Object} [flags] { readyForPickup }
+ * @param {Object} [flags] what Postgres knows about the order
+ * @param {boolean} [flags.readyForPickup]
+ * @param {Object} [flags.ticket] { status, usedAt, code }, where code is only there for the buyer
  */
 exports.toCampusOrder = (tx, included = [], flags = {}) => {
   const processName = tx.attributes?.processName || '';
@@ -102,7 +104,12 @@ exports.toCampusOrder = (tx, included = [], flags = {}) => {
   const qty =
     lineItems.find(item => item.code === 'line-item/item' || item.code === 'line-item/units')
       ?.quantity || 1;
-  const status = statusFromTransaction(tx, flags);
+  const ticket = kind === 'ticket' ? flags.ticket || null : null;
+  let status = statusFromTransaction(tx, flags);
+  // A scanned ticket is done for both sides, even in the moments before Sharetribe is told.
+  if (ticket?.status === 'used' && status === 'confirmed') {
+    status = 'completed';
+  }
 
   const order = {
     id: tx.id.uuid,
@@ -153,7 +160,18 @@ exports.toCampusOrder = (tx, included = [], flags = {}) => {
     order.bookingEnd = booking.attributes.end;
   }
 
+  if (kind === 'ticket') {
+    // issued, used or void. 'pending' until the ticket has its code, which takes a moment.
+    order.ticketStatus = ticket?.status || 'pending';
+    order.ticketCode = ticket?.code || null;
+    order.usedAt = ticket?.usedAt || null;
+  }
+
   const last = order.lastTransition || '';
+  if (kind === 'ticket' && /confirm-payment/i.test(last) && ticket?.status !== 'used') {
+    // The seller can refund a ticket until it is scanned.
+    order.can.cancel = true;
+  }
   if (kind === 'product') {
     if (/confirm-payment/i.test(last)) {
       order.can.markDelivered = true;

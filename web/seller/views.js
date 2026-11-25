@@ -35,7 +35,7 @@ const lowStockListings = () => myListings().filter(isRunningLow);
 function orderWhen(order) {
   const day = dayLabel(dateKey(new Date(order.updatedAt)));
   if (order.status === "cancelled") return `Cancelled · ${day}`;
-  if (order.status === "completed") return `${order.kind === "service" ? "Session held" : order.kind === "ticket" ? "Scanned at the door" : "Picked up"} · ${day}`;
+  if (order.status === "completed") return `${order.kind === "service" ? "Session held" : order.kind === "ticket" ? (order.ticketStatus === "used" ? "Scanned at the door" : "Not scanned") : "Picked up"} · ${day}`;
   return order.date ? slotLabel(order) : order.when || "";
 }
 
@@ -43,7 +43,7 @@ const sellerSettingsRow = (key, title, body) => settingsRow(data.sellerSettings[
 
 function orderStatusLabel(order) {
   if (order.status === "requested") return order.kind === "service" ? "Booking request" : "New order";
-  if (order.status === "confirmed") return order.kind === "service" ? "Upcoming" : "Paid";
+  if (order.status === "confirmed") return order.kind === "service" ? "Upcoming" : order.kind === "ticket" ? "Valid ticket" : "Paid";
   if (order.status === "ready") return "Ready for pickup";
   if (order.status === "completed") return "Completed";
   if (order.status === "disputed") return "Problem reported";
@@ -128,7 +128,7 @@ function dashboardAttention() {
 
 function storefrontPreview(seller) {
   const listings = myListings().filter((listing) => listingStatus(listing) === "active").slice(0, 2);
-  const rows = listings.map((listing) => `<button type="button" class="storefront-listing" data-action="seller-preview-listing" data-id="${listing.id}">${listingThumb(listing)}<span class="attention-copy"><strong>${escapeHtml(listing.title)}</strong><span class="muted small">${money(listing.price)} · ${listing.kind === "service" ? "Book" : "Shop"}</span></span></button>`).join("");
+  const rows = listings.map((listing) => `<button type="button" class="storefront-listing" data-action="seller-preview-listing" data-id="${listing.id}">${listingThumb(listing)}<span class="attention-copy"><strong>${escapeHtml(listing.title)}</strong><span class="muted small">${money(listing.price)} · ${listing.kind === "service" ? "Book" : listing.kind === "ticket" ? "Tickets" : "Shop"}</span></span></button>`).join("");
   return `<button type="button" class="storefront-seller" data-action="seller-preview-profile">${personMark("span", "seller-avatar dash-avatar", seller.initials, seller.id)}<span class="attention-copy"><strong>${escapeHtml(seller.name)}</strong><span class="storefront-handle"><span class="muted small">${escapeHtml(seller.handle)}</span>${studentVerifiedPill()}</span><span class="storefront-bio">${escapeHtml(seller.bio)}</span></span><span class="storefront-rating">${seller.rating} ★</span></button>${rows}`;
 }
 
@@ -228,7 +228,7 @@ function listingManageCard(listing) {
   const stats = statsFor(listing.id);
   const fact = listingAvailabilityFact(listing);
   const note = listingNote(listing);
-  const kindLabel = listing.kind === "service" ? "Service" : "Product";
+  const kindLabel = listing.kind === "service" ? "Service" : listing.kind === "ticket" ? "Event" : "Product";
   return `<article class="listing-manage tone-${listingTone(listing)}">
     <div class="listing-manage-identity">
       ${listingThumb(listing)}
@@ -284,7 +284,7 @@ function sellerListingsView() {
     ${tabBar(tabs, ui.listingsTab, "seller-set-listings-tab", true)}
     <div class="listings-toolbar">
       <form class="global-search listings-search">${icon("search")}<input id="seller-listings-search-input" data-live="listingsQuery" type="search" value="${escapeHtml(state.listingsQuery)}" placeholder="Search by name or category" aria-label="Search your listings" autocomplete="off" /></form>
-      <div class="listings-filter listings-filter-type"><span>Type</span><div class="segmented" role="group" aria-label="Listing type"><button type="button" class="segment ${ui.listingsKind === "all" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="all">All</button><button type="button" class="segment ${ui.listingsKind === "service" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="service">Services</button><button type="button" class="segment ${ui.listingsKind === "product" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="product">Products</button></div></div>
+      <div class="listings-filter listings-filter-type"><span>Type</span><div class="segmented" role="group" aria-label="Listing type"><button type="button" class="segment ${ui.listingsKind === "all" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="all">All</button><button type="button" class="segment ${ui.listingsKind === "service" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="service">Services</button><button type="button" class="segment ${ui.listingsKind === "product" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="product">Products</button><button type="button" class="segment ${ui.listingsKind === "ticket" ? "active" : ""}" data-action="seller-set-listings-kind" data-kind="ticket">Events</button></div></div>
     </div>
     <div class="section-header seller-result-row"><span class="result-count">${narrowed || ui.listingsTab !== "all" ? `${filtered.length} of ${all.length}` : plural(filtered.length, "listing")}</span>${narrowed || ui.listingsTab !== "all" ? `<button class="text-button" data-action="seller-clear-listing-filters">Show everything</button>` : ""}</div>
     ${list || empty}`;
@@ -298,7 +298,7 @@ function openDeleteListingModal(listing) {
 function draftListing() {
   const listing = getListing(state.seller.editListingId);
   const draft = state.seller.draft;
-  const product = listing.kind === "service" ? {} : { condition: draft.condition, availability: draft.availability };
+  const product = listing.kind === "product" ? { condition: draft.condition, availability: draft.availability } : {};
   return { ...listing, ...product, title: draft.title || "Untitled listing", category: draft.category, price: Number(draft.price) || 0, unit: draft.unit, description: draft.description, emoji: draft.emoji || listing.emoji, accent: draft.accent };
 }
 
@@ -307,6 +307,8 @@ function sellerListingEditView() {
   const draft = state.seller.draft;
   if (!listing || !draft) return sellerListingsView();
   const service = listing.kind === "service";
+  const ticket = listing.kind === "ticket";
+  const kindName = service ? "service" : ticket ? "event" : "product";
   const stats = statsFor(listing.id);
   const store = myStore();
   const collectionOptions = `<option value="">No collection</option>${(store?.collections || []).map((collection) => `<option ${collection.name === draft.collection ? "selected" : ""}>${escapeHtml(collection.name)}</option>`).join("")}`;
@@ -316,21 +318,30 @@ function sellerListingEditView() {
   const productFields = `<div class="field"><label for="edit-qty">Quantity in stock</label><input id="edit-qty" type="number" min="0" data-draft="quantityAvailable" value="${escapeHtml(draft.quantityAvailable)}" /><span class="field-note">Set to 0 to mark it sold out.</span></div>
     <div class="field"><label for="edit-condition">Condition</label><select id="edit-condition" data-draft="condition">${selectOptions(listing.merchandiseType === "new" ? ["New", "Made to order", "Digital download"] : ["Like new", "Good condition", "Fair condition"], draft.condition)}</select></div>
     <div class="field full"><label for="edit-availability">Pickup or delivery line</label><input id="edit-availability" data-draft="availability" value="${escapeHtml(draft.availability)}" /></div>`;
-  return `${sellerHeader({ eyebrow: `Edit ${service ? "service" : "product"}`, title: escapeHtml(listing.title), sub: `${escapeHtml(store?.name || "")} · last saved in this demo session`, back: { view: "seller-listings", label: "Back to listings" }, actions: `<button class="ghost-button" data-action="seller-preview-listing" data-id="${listing.id}">${icon("eye")} View as buyer</button>` })}
+  const ticketFields = `<div class="field"><label for="edit-event-date">Date</label><input id="edit-event-date" type="date" required data-draft="eventDate" value="${escapeHtml(draft.eventDate)}" /></div>
+    <div class="field"><label for="edit-event-time">Start time</label><input id="edit-event-time" type="time" required data-draft="eventTime" value="${escapeHtml(draft.eventTime)}" /></div>
+    <div class="field"><label for="edit-venue">Where it is</label><input id="edit-venue" required maxlength="80" data-draft="venue" value="${escapeHtml(draft.venue)}" /></div>
+    <div class="field"><label for="edit-host">Hosted by</label><input id="edit-host" maxlength="60" data-draft="host" value="${escapeHtml(draft.host)}" /><span class="field-note">Your club or organization. Leave it empty to show your own name.</span></div>
+    <div class="field"><label for="edit-qty">Tickets left</label><input id="edit-qty" type="number" min="0" data-draft="quantityAvailable" value="${escapeHtml(draft.quantityAvailable)}" /><span class="field-note">Set to 0 to stop sales.</span></div>
+    <div class="field full"><p class="field-note">Times are San Diego time. If the date changes, tell the people who already bought a ticket. You can refund any ticket that has not been scanned from its order.</p></div>`;
+  const categoryField = ticket ? "" : `<div class="field"><label for="edit-category">Category</label><select id="edit-category" data-draft="category">${selectOptions(service ? SERVICE_CATEGORIES : PRODUCT_CATEGORIES, draft.category)}</select></div>`;
+  const unitField = ticket ? "" : `<div class="field"><label for="edit-unit">${service ? "Duration or unit" : "Unit or size"}</label><input id="edit-unit" data-draft="unit" value="${escapeHtml(draft.unit)}" /></div>`;
+  const meetingField = ticket ? "" : `<div class="field full"><label for="edit-meeting">${service ? "Where it happens" : "Handoff location"}</label><input id="edit-meeting" data-draft="meeting" value="${escapeHtml(draft.meeting)}" /></div>`;
+  return `${sellerHeader({ eyebrow: `Edit ${kindName}`, title: escapeHtml(listing.title), sub: `${escapeHtml(store?.name || "")} · last saved in this demo session`, back: { view: "seller-listings", label: "Back to listings" }, actions: `<button class="ghost-button" data-action="seller-preview-listing" data-id="${listing.id}">${icon("eye")} View as buyer</button>` })}
     <div class="editor-layout">
       <form class="form-card editor-form" data-form="seller-save-listing">
         <div class="editor-status"><span class="small muted">Visibility</span><div class="segmented">${statusChoice}</div></div>
         <div class="form-grid">
           <div class="field full"><label for="edit-title">Title</label><input id="edit-title" required maxlength="70" data-draft="title" value="${escapeHtml(draft.title)}" /></div>
-          <div class="field"><label for="edit-category">Category</label><select id="edit-category" data-draft="category">${selectOptions(service ? SERVICE_CATEGORIES : PRODUCT_CATEGORIES, draft.category)}</select></div>
+          ${categoryField}
           <div class="field"><label for="edit-price">Price ($)</label><input id="edit-price" type="number" min="1" step="0.5" required data-draft="price" value="${escapeHtml(draft.price)}" /></div>
-          <div class="field"><label for="edit-unit">${service ? "Duration or unit" : "Unit or size"}</label><input id="edit-unit" data-draft="unit" value="${escapeHtml(draft.unit)}" /></div>
+          ${unitField}
           <div class="field"><label for="edit-emoji">Cover emoji</label><input id="edit-emoji" maxlength="4" data-draft="emoji" value="${escapeHtml(draft.emoji)}" /></div>
           <div class="field full"><label>Cover color</label><div class="swatch-row">${swatches}</div></div>
           <div class="field"><label for="edit-collection">Collection</label><select id="edit-collection" data-draft="collection">${collectionOptions}</select><span class="field-note">Collections are how buyers browse your store.</span></div>
           <div class="field full"><label for="edit-description">Description</label><textarea id="edit-description" required data-draft="description">${escapeHtml(draft.description)}</textarea></div>
-          <div class="field full"><label for="edit-meeting">${service ? "Where it happens" : "Handoff location"}</label><input id="edit-meeting" data-draft="meeting" value="${escapeHtml(draft.meeting)}" /></div>
-          ${service ? hoursNote : productFields}
+          ${meetingField}
+          ${service ? hoursNote : ticket ? ticketFields : productFields}
         </div>
         <div class="button-row form-actions"><button class="primary-button" type="submit">Save changes ${icon("check")}</button><button class="ghost-button" type="button" data-view="seller-listings">Cancel</button><button class="danger-button" type="button" data-action="seller-delete-listing" data-id="${listing.id}">${icon("trash")} Delete</button></div>
       </form>
@@ -360,7 +371,7 @@ const ORDER_TABS = [
 function orderRow(order) {
   const listing = getListing(order.listingId);
   return `<button type="button" class="seller-row seller-row-button tone-${order.status}" data-action="seller-open-order" data-id="${order.id}">
-    <span class="cell cell-main"><span class="row-title">${listingThumb(listing)}<span><span class="activity-title">${escapeHtml(orderListingTitle(order))}</span><span class="activity-sub">${order.kind === "service" ? "Booking" : `Order × ${order.qty}`} · CC-${order.id.slice(-4).toUpperCase()}</span></span></span></span>
+    <span class="cell cell-main"><span class="row-title">${listingThumb(listing)}<span><span class="activity-title">${escapeHtml(orderListingTitle(order))}</span><span class="activity-sub">${order.kind === "service" ? "Booking" : order.kind === "ticket" ? "Ticket" : `Order × ${order.qty}`} · CC-${order.id.slice(-4).toUpperCase()}</span></span></span></span>
     <span class="cell" data-label="Buyer"><span class="buyer-cell">${buyerAvatar(order)} ${escapeHtml(order.buyer)}</span></span>
     <span class="cell" data-label="When"><strong>${escapeHtml(orderWhen(order))}</strong><span class="muted small">Placed ${escapeHtml(timeAgo(order.placedAt))}</span></span>
     <span class="cell" data-label="Amount"><strong>${money(order.amount)}</strong></span>
@@ -403,10 +414,12 @@ function orderTimeline(order) {
 
 function orderActions(order) {
   const id = order.id;
-  if (order.kind === "ticket" && order.status !== "completed") {
-    return `<button class="primary-button" data-view="seller-scan">${icon("ticket")} Scan at the door</button>`;
+  if (order.kind === "ticket" && order.status === "confirmed") {
+    return `<button class="primary-button" data-view="seller-scan">${icon("ticket")} Scan at the door</button>${order.can?.cancel ? `<button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>` : ""}`;
   }
-  if (order.kind === "ticket") return `<p class="muted small">Scanned. This ticket cannot be used again.</p>`;
+  if (order.kind === "ticket" && order.status === "completed") {
+    return `<p class="muted small">${order.ticketStatus === "used" ? "Scanned. This ticket cannot be used again." : "The event is over and this ticket was never scanned. You are still paid for it."}</p>`;
+  }
   // Products have no accept step after payment — only services wait on the seller.
   if (order.status === "requested" && order.kind === "service") {
     return `<button class="primary-button" data-action="seller-order-accept" data-id="${id}">${icon("check")} Accept booking</button><button class="ghost-button" data-action="seller-order-decline" data-id="${id}">Decline</button>`;
@@ -435,14 +448,14 @@ function sellerOrderView() {
   const listing = getListing(order.listingId);
   const unitPrice = order.amount / (order.qty || 1);
   const payoutLine = order.status === "completed" ? "Added to your balance" : order.status === "cancelled" ? "No payout · refunded" : "Released after completion";
-  return `${sellerHeader({ eyebrow: `${order.kind === "service" ? "Booking" : "Order"} · CC-${order.id.slice(-4).toUpperCase()}`, title: escapeHtml(orderListingTitle(order)), sub: `${escapeHtml(order.buyer)} · placed ${escapeHtml(timeAgo(order.placedAt))}`, back: { action: "seller-back-to-orders", label: "Back to orders" }, actions: `<button class="ghost-button" data-action="seller-message-buyer" data-id="${order.id}">${icon("chat")} Message buyer</button>` })}
+  return `${sellerHeader({ eyebrow: `${order.kind === "service" ? "Booking" : order.kind === "ticket" ? "Ticket" : "Order"} · CC-${order.id.slice(-4).toUpperCase()}`, title: escapeHtml(orderListingTitle(order)), sub: `${escapeHtml(order.buyer)} · placed ${escapeHtml(timeAgo(order.placedAt))}`, back: { action: "seller-back-to-orders", label: "Back to orders" }, actions: `<button class="ghost-button" data-action="seller-message-buyer" data-id="${order.id}">${icon("chat")} Message buyer</button>` })}
     <div class="order-layout">
       <section class="order-panel">
         <div class="order-main-top"><div class="summary-visual" style="border:0;padding:0">${listing ? cardThumb(listing.title, listing.accent, listing.emoji) : ""}<div><strong>${escapeHtml(orderListingTitle(order))}</strong><div class="small muted">${escapeHtml(getStore(listing?.storeId)?.name || "")}</div></div></div>${statusPill(order.status, orderStatusLabel(order))}</div>
         ${orderTimeline(order)}
         <div class="order-detail-card seller-order-details">
-          <div class="order-detail-row"><span>${order.kind === "service" ? "When" : "Pickup"}</span><strong>${escapeHtml(orderWhen(order))}</strong></div>
-          <div class="order-detail-row"><span>${order.kind === "service" ? "Where" : "Handoff spot"}</span><strong>${escapeHtml(listing?.meeting || "Campus")}</strong></div>
+          <div class="order-detail-row"><span>${order.kind === "service" ? "When" : order.kind === "ticket" ? "Event" : "Pickup"}</span><strong>${escapeHtml(order.kind === "ticket" && order.status === "confirmed" ? listing?.availability || "" : orderWhen(order))}</strong></div>
+          <div class="order-detail-row"><span>${order.kind === "product" ? "Handoff spot" : "Where"}</span><strong>${escapeHtml(listing?.meeting || "Campus")}</strong></div>
           <div class="order-detail-row"><span>${order.kind === "service" ? "Length" : "Quantity"}</span><strong>${order.kind === "service" ? escapeHtml(listing?.unit || "") : order.qty}</strong></div>
           <div class="order-detail-row"><span>Buyer</span><strong>${escapeHtml(order.buyer)} · Student verified</strong></div>
           ${order.ticketCode ? `<div class="order-detail-row"><span>Ticket code</span><strong>${escapeHtml(order.ticketCode)}</strong></div>` : ""}
@@ -476,9 +489,28 @@ function openRescheduleModal(order, slots) {
 
 /* ---------- Ticket scanning ---------- */
 
+/** One event on the scan page: how many tickets are in, and who else may scan. */
+function doorEventCard(event) {
+  const host = event.role === "host";
+  const open = state.seller.doorEventId === event.listingId;
+  const helpers = event.helpers.length
+    ? `<ul class="door-helper-list">${event.helpers.map((helper) => `<li><span><strong>${escapeHtml(helper.name || helper.email)}</strong><span class="muted small">${escapeHtml(helper.email)}</span></span><button type="button" class="text-button" data-action="seller-remove-door-helper" data-listing="${event.listingId}" data-user="${helper.userId}">Remove</button></li>`).join("")}</ul>`
+    : `<p class="muted small">Only you can scan tickets for this event.</p>`;
+  const helperForm = open
+    ? `<form class="door-helper-form" data-form="seller-add-door-helper" data-listing="${event.listingId}"><div class="field"><label for="door-helper-email">Their SDSU email</label><input id="door-helper-email" name="email" type="email" required placeholder="name@sdsu.edu" autocomplete="off" /></div><div class="button-row"><button class="primary-button" type="submit">Add helper</button><button class="ghost-button" type="button" data-action="seller-close-door-helper">Cancel</button></div></form>`
+    : `<button type="button" class="ghost-button" data-action="seller-open-door-helper" data-id="${event.listingId}">${icon("plus")} Add a door helper</button>`;
+  return `<article class="seller-card door-event">
+    <div class="door-event-top"><div><h3>${escapeHtml(event.title)}</h3><p class="muted small">${escapeHtml(event.when)}${host ? "" : " · You are a door helper"}</p></div><div class="door-count"><strong>${event.used} of ${event.sold}</strong><span class="muted small">scanned in</span></div></div>
+    ${host ? `<div class="door-helpers"><div class="eyebrow">Door helpers</div>${helpers}${helperForm}</div>` : ""}
+  </article>`;
+}
+
 function sellerScanView() {
   const result = state.seller.scanResult;
   const banner = result ? `<div class="scan-result ${result.ok ? "is-valid" : "is-used"}"><strong>${escapeHtml(result.title)}</strong><p>${escapeHtml(result.message)}</p></div>` : "";
+  const events = data.door.length
+    ? `<section class="section"><div class="section-header"><h2>Your events</h2></div><div class="door-events">${data.door.map(doorEventCard).join("")}</div></section>`
+    : `<section class="section"><div class="empty-state"><div class="empty-shape">${icon("ticket", 26)}</div><h3>No events to scan for yet.</h3><p class="muted">List tickets for an event you are hosting, or ask a host to add you as a door helper.</p><button class="primary-button" data-action="seller-new-listing">${icon("plus")} List tickets</button></div></section>`;
   return `${sellerHeader({ eyebrow: "At the door", title: "Scan a ticket", sub: "A valid code is marked used. A second scan will not let them in.", back: { view: "seller-orders", label: "Back to orders" } })}
     <div class="scan-layout">
       <section class="scan-stage">
@@ -488,11 +520,12 @@ function sellerScanView() {
         <button class="primary-button" type="button" data-action="seller-start-scan">${icon("ticket")} Start camera</button>
       </section>
       <form class="form-card scan-code-card" data-form="seller-scan-code">
-        <div class="field"><label for="ticket-code">Ticket code</label><input id="ticket-code" name="code" required maxlength="12" placeholder="e.g. CC7K3M9Q" autocomplete="off" /></div>
+        <div class="field"><label for="ticket-code">Ticket code</label><input id="ticket-code" name="code" required maxlength="14" placeholder="e.g. K7M3QX9RTB" autocomplete="off" autocapitalize="characters" /></div>
         ${banner}
         <button class="primary-button" type="submit">Mark used ${icon("check")}</button>
       </form>
-    </div>`;
+    </div>
+    ${events}`;
 }
 
 /* ---------- Analytics ---------- */

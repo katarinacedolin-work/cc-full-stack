@@ -1,0 +1,165 @@
+{:format :v3,
+ :transitions
+ [{:name :transition/inquire,
+   :actor :actor.role/customer,
+   :actions [{:name :action/update-protected-data}],
+   :to :state/inquiry}
+  {:name :transition/request-payment,
+   :actor :actor.role/customer,
+   :privileged? true,
+   :actions
+   [{:name :action/update-protected-data}
+    {:name :action/create-pending-stock-reservation}
+    {:name :action/privileged-set-line-items}
+    {:name :action/stripe-create-payment-intent}],
+   :to :state/pending-payment}
+  {:name :transition/request-payment-after-inquiry,
+   :actor :actor.role/customer,
+   :privileged? true,
+   :actions
+   [{:name :action/update-protected-data}
+    {:name :action/create-pending-stock-reservation}
+    {:name :action/privileged-set-line-items}
+    {:name :action/stripe-create-payment-intent}],
+   :from :state/inquiry,
+   :to :state/pending-payment}
+  {:name :transition/confirm-payment,
+   :actor :actor.role/customer,
+   :actions
+   [{:name :action/accept-stock-reservation}
+    {:name :action/stripe-confirm-payment-intent}
+    {:name :action/stripe-capture-payment-intent}],
+   :from :state/pending-payment,
+   :to :state/purchased}
+  {:name :transition/expire-payment,
+   :at
+   {:fn/plus
+    [{:fn/timepoint [:time/first-entered-state :state/pending-payment]}
+     {:fn/period ["PT15M"]}]},
+   :actions
+   [{:name :action/calculate-full-refund}
+    {:name :action/stripe-refund-payment}
+    ;; Keep this action last in the list of actions for
+    ;; the transition
+    {:name :action/decline-stock-reservation}],
+   :from :state/pending-payment,
+   :to :state/payment-expired}
+  ;; The web service runs this for the seller (through the Integration API) before the
+  ;; event starts, and the team can run it from Console at any time. It refunds in full.
+  {:name :transition/cancel,
+   :actor :actor.role/operator,
+   :actions
+   [{:name :action/calculate-full-refund}
+    {:name :action/stripe-refund-payment}
+    ;; Keep this action last in the list of actions for
+    ;; the transition
+    {:name :action/cancel-stock-reservation}],
+   :from :state/purchased,
+   :to :state/canceled}
+  ;; The web service runs this when the last ticket of the order is scanned at the door.
+  ;; The worker runs it a few hours after the event for orders that were never scanned,
+  ;; so a no-show still pays the seller.
+  {:name :transition/operator-complete,
+   :actor :actor.role/operator,
+   :actions [{:name :action/stripe-create-payout}],
+   :from :state/purchased,
+   :to :state/completed}
+  ;; A backstop in case the worker never completes the order. Stripe can hold a payment
+  ;; for at most 90 days, which is also why sales open at most 80 days before an event.
+  {:name :transition/auto-complete,
+   :at
+   {:fn/plus
+    [{:fn/timepoint [:time/first-entered-state :state/purchased]}
+     {:fn/period ["P85D"]}]},
+   :actions [{:name :action/stripe-create-payout}],
+   :from :state/purchased,
+   :to :state/completed}
+  {:name :transition/review-1-by-provider,
+   :actor :actor.role/provider,
+   :actions [{:name :action/post-review-by-provider}],
+   :from :state/completed,
+   :to :state/reviewed-by-provider}
+  {:name :transition/review-2-by-provider,
+   :actor :actor.role/provider,
+   :actions
+   [{:name :action/post-review-by-provider}
+    {:name :action/publish-reviews}],
+   :from :state/reviewed-by-customer,
+   :to :state/reviewed}
+  {:name :transition/review-1-by-customer,
+   :actor :actor.role/customer,
+   :actions [{:name :action/post-review-by-customer}],
+   :from :state/completed,
+   :to :state/reviewed-by-customer}
+  {:name :transition/review-2-by-customer,
+   :actor :actor.role/customer,
+   :actions
+   [{:name :action/post-review-by-customer}
+    {:name :action/publish-reviews}],
+   :from :state/reviewed-by-provider,
+   :to :state/reviewed}
+  {:name :transition/expire-review-period,
+   :at
+   {:fn/plus
+    [{:fn/timepoint [:time/first-entered-state :state/completed]}
+     {:fn/period ["P7D"]}]},
+   :actions [],
+   :from :state/completed,
+   :to :state/reviewed}
+  {:name :transition/expire-provider-review-period,
+   :at
+   {:fn/plus
+    [{:fn/timepoint [:time/first-entered-state :state/completed]}
+     {:fn/period ["P7D"]}]},
+   :actions [{:name :action/publish-reviews}],
+   :from :state/reviewed-by-customer,
+   :to :state/reviewed}
+  {:name :transition/expire-customer-review-period,
+   :at
+   {:fn/plus
+    [{:fn/timepoint [:time/first-entered-state :state/completed]}
+     {:fn/period ["P7D"]}]},
+   :actions [{:name :action/publish-reviews}],
+   :from :state/reviewed-by-provider,
+   :to :state/reviewed}],
+ :notifications
+ [{:name :notification/ticket-receipt,
+   :on :transition/confirm-payment,
+   :to :actor.role/customer,
+   :template :ticket-receipt}
+  {:name :notification/ticket-sold,
+   :on :transition/confirm-payment,
+   :to :actor.role/provider,
+   :template :ticket-sold}
+  {:name :notification/ticket-canceled-to-customer,
+   :on :transition/cancel,
+   :to :actor.role/customer,
+   :template :ticket-canceled-to-customer}
+  {:name :notification/ticket-canceled-to-provider,
+   :on :transition/cancel,
+   :to :actor.role/provider,
+   :template :ticket-canceled-to-provider}
+  {:name :notification/ticket-review-wanted-after-scan,
+   :on :transition/operator-complete,
+   :to :actor.role/customer,
+   :template :ticket-review-by-customer-wanted}
+  {:name :notification/ticket-review-wanted-after-backstop,
+   :on :transition/auto-complete,
+   :to :actor.role/customer,
+   :template :ticket-review-by-customer-wanted}
+  {:name :notification/ticket-review-by-provider-first,
+   :on :transition/review-1-by-provider,
+   :to :actor.role/customer,
+   :template :ticket-review-by-other-party-unpublished}
+  {:name :notification/ticket-review-by-customer-first,
+   :on :transition/review-1-by-customer,
+   :to :actor.role/provider,
+   :template :ticket-review-by-other-party-unpublished}
+  {:name :notification/ticket-review-by-provider-second,
+   :on :transition/review-2-by-provider,
+   :to :actor.role/customer,
+   :template :ticket-review-by-other-party-published}
+  {:name :notification/ticket-review-by-customer-second,
+   :on :transition/review-2-by-customer,
+   :to :actor.role/provider,
+   :template :ticket-review-by-other-party-published}]}

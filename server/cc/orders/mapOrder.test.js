@@ -113,6 +113,57 @@ describe('toCampusOrder', () => {
     });
   });
 
+  describe('ticket orders', () => {
+    const ticketTx = lastTransition =>
+      tx({ attributes: { processName: 'cc-ticket', lastTransition } });
+
+    it('waits for the code right after payment', () => {
+      expect(toCampusOrder(ticketTx('transition/confirm-payment'), included)).toMatchObject({
+        kind: 'ticket',
+        status: 'confirmed',
+        ticketStatus: 'pending',
+        ticketCode: null,
+        can: expect.objectContaining({ cancel: true, review: false }),
+      });
+    });
+
+    it('carries the ticket the buyer shows at the door', () => {
+      const order = toCampusOrder(ticketTx('transition/confirm-payment'), included, {
+        ticket: { status: 'issued', usedAt: null, code: 'K7M3QX9RTB' },
+      });
+      expect(order).toMatchObject({ ticketStatus: 'issued', ticketCode: 'K7M3QX9RTB' });
+    });
+
+    it('is done once scanned, before Sharetribe has completed the order', () => {
+      const order = toCampusOrder(ticketTx('transition/confirm-payment'), included, {
+        ticket: { status: 'used', usedAt: '2026-12-06T03:10:00.000Z' },
+      });
+      expect(order).toMatchObject({
+        status: 'completed',
+        ticketStatus: 'used',
+        ticketCode: null,
+        usedAt: '2026-12-06T03:10:00.000Z',
+        can: expect.objectContaining({ cancel: false }),
+      });
+    });
+
+    it('can be reviewed after the order is completed', () => {
+      const order = toCampusOrder(ticketTx('transition/operator-complete'), included, {
+        ticket: { status: 'used', usedAt: '2026-12-06T03:10:00.000Z' },
+      });
+      expect(order.status).toBe('completed');
+      expect(order.can.review).toBe(true);
+    });
+
+    it('is cancelled when the seller refunds it', () => {
+      const order = toCampusOrder(ticketTx('transition/cancel'), included, {
+        ticket: { status: 'void', usedAt: null },
+      });
+      expect(order).toMatchObject({ status: 'cancelled', ticketStatus: 'void' });
+      expect(order.can.cancel).toBe(false);
+    });
+  });
+
   it('shows a booking as a campus date and clock', () => {
     const booked = tx({
       attributes: { processName: 'default-booking', lastTransition: 'transition/accept' },
