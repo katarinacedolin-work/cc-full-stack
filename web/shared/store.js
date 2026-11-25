@@ -21,7 +21,6 @@ const data = {
   stores: [],
   jobs: [],
   housing: [],
-  chores: [],
   ticketPosts: [],
   conversations: [],
   notifications: [],
@@ -54,7 +53,6 @@ const LOADERS = {
   stores: api.getStores,
   jobs: api.getJobs,
   housing: api.getHousing,
-  chores: api.getChores,
   ticketPosts: api.getTicketPosts,
   conversations: api.getConversations,
   notifications: api.getNotifications,
@@ -74,7 +72,7 @@ const LOADERS = {
 
 /** What each page fetches when it opens. */
 const SHARED_DATA = ["session", "categories", "listings", "sellers", "stores", "conversations", "notifications"];
-const BUYER_DATA = [...SHARED_DATA, "schoolServices", "agents", "apartments", "jobs", "housing", "chores", "ticketPosts", "account", "paymentMethods", "orders"];
+const BUYER_DATA = [...SHARED_DATA, "schoolServices", "agents", "apartments", "jobs", "housing", "ticketPosts", "account", "paymentMethods", "orders"];
 const SELLER_DATA = [...SHARED_DATA, "sellerOrders", "door", "listingStats", "analytics", "reviews", "sellerSettings", "schedule", "calendar", "payouts"];
 
 /** Fetches the named parts of `data` again: `await load("listings", "stores")`. */
@@ -117,8 +115,6 @@ const state = {
   storeReturn: null,
   selectedSchoolServiceId: null,
   schoolServiceReturn: null,
-  selectedChoreId: null,
-  boardReturn: null,
   selectedOrderId: null,
   selectedConversationId: null,
 
@@ -137,9 +133,7 @@ const state = {
   /* Buyer: boards and settings. */
   jobFormOpen: false,
   housingFormOpen: false,
-  choreFormOpen: false,
   ticketPostKind: null,
-  ticketDmPostId: null,
   settingsSection: "account",
 
   /* Seller Hub. */
@@ -185,9 +179,6 @@ const storeCategories = (store) => [...new Set(storeListings(store).map((listing
 
 const selectedConversation = () => data.conversations.find((conversation) => conversation.id === state.selectedConversationId) || data.conversations[0];
 const unreadCount = (items) => items.filter((item) => item.unread).length;
-
-/** Chores are services in the Help category. They are booked from the Chore Board instead of the Book page. */
-const isChoreListing = (listing) => listing.kind === "service" && listing.category === "Help";
 
 /** True when the search text appears in any of the given fields. An empty search matches everything. */
 const matchesSearch = (query, ...fields) => fields.join(" ").toLowerCase().includes(query.trim().toLowerCase());

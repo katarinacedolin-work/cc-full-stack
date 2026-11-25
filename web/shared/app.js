@@ -118,11 +118,11 @@ function navigate(view) {
 
 function openHelpModal() {
   renderModal(`<div class="eyebrow">Support</div><h2>Tell us what happened.</h2>
-    <p class="muted">This prototype does not send a real case, but the interaction shows how support should feel: calm, specific and connected to the order.</p>
+    <p class="muted">The team reads this and replies to your SDSU email.</p>
     <form data-form="support">
       <div class="field"><label for="support-topic">What do you need help with?</label><select id="support-topic" name="topic"><option>Question about a booking</option><option>Question about a product pickup</option><option>Safety or trust concern</option><option>Payment or refund question</option></select></div>
       <div class="field"><label for="support-message">Tell us more</label><textarea id="support-message" name="message" required placeholder="Share the details we need to understand."></textarea></div>
-      <div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Create demo case ${icon("arrow")}</button></div>
+      <div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Send ${icon("arrow")}</button></div>
     </form>`);
 }
 
@@ -189,7 +189,7 @@ Object.assign(FORMS, {
   support: async (fields) => {
     await api.createSupportCase(fields);
     closeModal();
-    showToast("Demo support case created. Someone would follow up here.");
+    showToast("Sent. The team will reply to your SDSU email.");
   },
   report: async (fields) => {
     await api.submitReport(fields);

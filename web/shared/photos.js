@@ -3,7 +3,7 @@
  *
  * Profile photos and store pictures are keyed by id. Card covers are keyed by
  * the card title, matching the files in photos/cards. A card without a photo
- * keeps its color block. A person without their own headshot reuses one of these.
+ * keeps its color block. A person without their own photo shows their initials.
  *
  *   PROFILE_PHOTOS["maya-chen"] = "photos/profiles/maya-chen.jpg";
  *   STORE_PHOTOS["maya-makes-photo"] = "photos/stores/maya-makes-photo.jpg";
@@ -15,9 +15,7 @@ const PROFILE_PHOTOS = {
   "riley-kim": "photos/profiles/riley-kim.jpg",
   "sam-okafor": "photos/profiles/sam-okafor.jpg",
   "taylor-brooks": "photos/profiles/taylor-brooks.jpg",
-  "zoe-rivera": "photos/profiles/zoe-rivera.jpg",
-  "agent-sofia": "photos/profiles/sofia-nguyen.jpg",
-  "agent-quinn": "photos/profiles/quinn-alvarez.jpg"
+  "zoe-rivera": "photos/profiles/zoe-rivera.jpg"
 };
 const STORE_PHOTOS = {};
 
@@ -64,25 +62,13 @@ function cardThumb(title, accent, emoji) {
   return framedMedia("div", `summary-thumb ${accent}`, title, emoji);
 }
 
-const PROFILE_POOL = Object.values(PROFILE_PHOTOS);
-
-function profileHash(key) {
-  let hash = 0;
-  for (let index = 0; index < key.length; index += 1) hash = (hash + key.charCodeAt(index) * (index + 1)) % PROFILE_POOL.length;
-  return PROFILE_POOL[hash];
-}
-
+/** This person's own photo, or "" so their initials show. Nobody is ever given someone else's face. */
 function profilePhoto(personId) {
-  if (!personId || !PROFILE_POOL.length) return "";
+  if (!personId) return "";
   const key = String(personId);
   if (PROFILE_PHOTOS[key]) return PROFILE_PHOTOS[key];
-  if (typeof data !== "undefined" && data) {
-    const seller = data.sellers?.find((person) => person.id === key || person.name === key);
-    if (seller && PROFILE_PHOTOS[seller.id]) return PROFILE_PHOTOS[seller.id];
-    const agent = data.agents?.find((person) => person.id === key || person.name === key);
-    if (agent && PROFILE_PHOTOS[agent.id]) return PROFILE_PHOTOS[agent.id];
-  }
-  return profileHash(key);
+  const seller = typeof data !== "undefined" && data?.sellers?.find((person) => person.id === key || person.name === key);
+  return (seller && PROFILE_PHOTOS[seller.id]) || "";
 }
 
 function storePhoto(storeId) {

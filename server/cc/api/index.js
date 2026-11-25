@@ -18,6 +18,9 @@ const payouts = require('./payouts');
 const tickets = require('./tickets');
 const conversations = require('./conversations');
 const notifications = require('./notifications');
+const boards = require('./boards');
+const directory = require('./directory');
+const support = require('./support');
 
 const router = express.Router();
 
@@ -90,6 +93,14 @@ router.post('/notifications/:id/read', asyncHandler(notifications.markRead));
 router.get('/settings', asyncHandler(notifications.getSettings));
 router.patch('/settings', asyncHandler(notifications.updateSettings));
 router.get('/changes', asyncHandler(notifications.changes));
+
+// ================ Boards, the directory and support ================ //
+
+router.get('/board-posts', asyncHandler(boards.list));
+router.post('/board-posts', asyncHandler(boards.create));
+router.delete('/board-posts/:id', asyncHandler(boards.remove));
+router.get('/directory', asyncHandler(directory.list));
+router.post('/support', asyncHandler(support.create));
 
 // ================ Fallbacks ================ //
 

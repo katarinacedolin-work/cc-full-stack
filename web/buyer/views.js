@@ -96,7 +96,7 @@ function listingCard(listing) {
       <div class="listing-body">
         <div class="listing-title">${escapeHtml(listing.title)}</div>
         ${listingCardMetaHtml(listing)}
-        ${isChoreListing(listing) ? "" : `<div class="seller-line">${personMark("span", "mini-avatar", listing.initials, listing.sellerId)}<span class="seller-name">${escapeHtml(listing.seller)}</span>${identityMark(listing)}</div>`}
+        <div class="seller-line">${personMark("span", "mini-avatar", listing.initials, listing.sellerId)}<span class="seller-name">${escapeHtml(listing.seller)}</span>${identityMark(listing)}</div>
         <div class="listing-meta">${listingPriceHtml(listing)}<span class="rating">${icon("star", 14)} ${listing.rating} <span class="muted">(${listing.reviews})</span></span></div>
       </div>
     </button>
@@ -118,9 +118,9 @@ function listingScrollSection(title, listings, link, sectionClass = "") {
   return `<section class="section section-home-shelf${extraClass}"><div class="section-header section-header-shelf"><h2>${title}</h2>${scrollSectionLink(link)}</div><div class="home-scroll-row listing-scroll-row">${listings.map(listingCard).join("")}</div></section>`;
 }
 
-function storeScrollSection(title, storeList, link, lead = "") {
-  if (!storeList.length && !lead) return "";
-  return `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>${title}</h2>${scrollSectionLink(link)}</div>${lead}<div class="home-scroll-row store-scroll-row">${storeList.map(storeCard).join("")}</div></section>`;
+function storeScrollSection(title, storeList, link) {
+  if (!storeList.length) return "";
+  return `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>${title}</h2>${scrollSectionLink(link)}</div><div class="home-scroll-row store-scroll-row">${storeList.map(storeCard).join("")}</div></section>`;
 }
 
 function categoryChipIcon(category) {
@@ -140,7 +140,7 @@ function categoryChips(kind = "all") {
 /* ---------- Home ---------- */
 
 function homeView() {
-  const shelf = allListings().filter((listing) => !isChoreListing(listing) && !listing.storeOnly);
+  const shelf = allListings().filter((listing) => !listing.storeOnly);
   const popular = shelf.filter((listing) => listing.kind !== "ticket").sort((a, b) => b.reviews + b.completed - (a.reviews + a.completed)).slice(0, 8);
   const booked = [...new Set(data.orders.map((order) => order.listingId))].map(getListing).filter(Boolean);
   const bookAgain = [...booked, ...shelf.filter((listing) => listing.kind === "service" && !booked.includes(listing))].slice(0, 8);
@@ -169,7 +169,7 @@ function homeView() {
   </section>
 
   ${listingScrollSection("Popular on campus", popular, { view: "search", label: "See all" })}
-  ${storeScrollSection("Campus stores", featuredStores, { view: "stores", label: "All stores" }, choreBoardCard())}
+  ${storeScrollSection("Campus stores", featuredStores, { view: "stores", label: "All stores" })}
   ${listingScrollSection("Book again", bookAgain, { view: "you", label: "View bookings" })}
 
   <section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>Recommended</h2><button class="text-button" data-view="search">Browse more ${icon("arrow")}</button></div><div class="listing-grid listing-grid-recommended">${recommended.map(listingCard).join("")}</div></section>
@@ -233,7 +233,6 @@ function browseResults(kind) {
   const searching = Boolean(state.query.trim());
   const results = allListings().filter((listing) => {
     if (kind !== "all" && listing.kind !== kind) return false;
-    if (kind === "service" && isChoreListing(listing)) return false;
     if (kind === "product" && listing.merchandiseType === "resale") return false;
     if (listing.storeOnly && !searching) return false;
     if (state.category !== "All" && listing.category !== state.category) return false;
@@ -274,7 +273,7 @@ function browseView(kind) {
   return `<div class="browse-header"><div><div class="eyebrow">${product ? "Shop" : service ? "Book" : "Search"}</div><h1>${title}</h1></div></div>
     <div class="browse-filters">
       <form class="global-search browse-page-search">${icon("search")}<input id="browse-search-input" data-live="query" type="search" value="${escapeHtml(state.query)}" placeholder="What do you need?" aria-label="Search the marketplace" autocomplete="off" /><kbd>⌘ K</kbd></form>
-      ${categoryBar}${service ? `${choreBoardSection(state.query)}${body}` : product ? body : ""}
+      ${categoryBar}${service || product ? body : ""}
     </div>
     ${service || product ? "" : body}`;
 }
@@ -345,17 +344,14 @@ function listingDetailView(listing) {
   if (!listing) return missingView("listing");
   const service = listing.kind === "service";
   const ticket = listing.kind === "ticket";
-  const onBoard = isChoreListing(listing);
   const store = getStore(listing.storeId);
   const returnStore = getStore(state.detailReturn);
-  const sellerCard = onBoard
-    ? `<div class="seller-card sold-by-card"><div class="seller-card-main"><div><div class="small muted">Listed on</div><div class="seller-name">Chore Board</div></div></div><button class="text-button visit-store-button" data-action="open-chore-board">Open Chore Board ${icon("arrow")}</button></div>`
-    : store
-      ? `<div class="seller-card sold-by-card"><div class="seller-card-main"><div class="${storeMarkClass(store)}" aria-hidden="true">${storeMarkContents(store)}</div><div><div class="small muted">Sold by</div><div class="seller-name">${escapeHtml(store.name)}</div><div class="seller-sub">Run by <button type="button" class="inline-link" data-action="open-seller" data-id="${listing.sellerId}">${escapeHtml(listing.seller)}</button> ${trustBadges(listing)}</div></div></div><button class="text-button visit-store-button" data-action="open-store" data-id="${store.id}">Visit store ${icon("arrow")}</button></div>`
-      : `<div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", listing.initials, listing.sellerId)}<div><div class="seller-name">${escapeHtml(listing.seller)}</div><div class="seller-sub">${escapeHtml(listing.campus)}</div>${trustBadges(listing)}</div></div><button class="text-button" data-action="open-seller" data-id="${listing.sellerId}">View profile ${icon("arrow")}</button></div>`;
+  const sellerCard = store
+    ? `<div class="seller-card sold-by-card"><div class="seller-card-main"><div class="${storeMarkClass(store)}" aria-hidden="true">${storeMarkContents(store)}</div><div><div class="small muted">Sold by</div><div class="seller-name">${escapeHtml(store.name)}</div><div class="seller-sub">Run by <button type="button" class="inline-link" data-action="open-seller" data-id="${listing.sellerId}">${escapeHtml(listing.seller)}</button> ${trustBadges(listing)}</div></div></div><button class="text-button visit-store-button" data-action="open-store" data-id="${store.id}">Visit store ${icon("arrow")}</button></div>`
+    : `<div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", listing.initials, listing.sellerId)}<div><div class="seller-name">${escapeHtml(listing.seller)}</div><div class="seller-sub">${escapeHtml(listing.campus)}</div>${trustBadges(listing)}</div></div><button class="text-button" data-action="open-seller" data-id="${listing.sellerId}">View profile ${icon("arrow")}</button></div>`;
   const soldOut = !service && listing.quantityAvailable < 1;
   const unavailable = soldOut || (service && !state.booking?.time);
-  const backLabel = state.detailReturn === "chore-board" || onBoard ? "Chore Board" : returnStore ? escapeHtml(returnStore.name) : ticket ? "Tickets" : service ? "Book" : "Shop";
+  const backLabel = returnStore ? escapeHtml(returnStore.name) : ticket ? "Tickets" : service ? "Book" : "Shop";
   const kindLabel = service ? "Service" : ticket ? escapeHtml(ticketHost(listing)) : escapeHtml(merchandiseTypeLabel(listing) || "Product");
   const buyLabel = soldOut ? "Sold out" : service ? "Book this time" : ticket ? "Buy ticket" : "Buy now";
   const detailBlock = service
@@ -363,17 +359,15 @@ function listingDetailView(listing) {
     : ticket
       ? `<div class="detail-block"><h3>At the door</h3><div class="info-row info-row-line"><span class="trust-icon">${icon("calendar")}</span><div><span class="small muted">Date and time</span><strong>${escapeHtml([listing.date, listing.time].filter(Boolean).join(" · ") || listing.availability)}</strong></div></div><div class="info-row info-row-line"><span class="trust-icon">${icon("check")}</span><div><span class="small muted">Location</span><strong>${escapeHtml(listing.location || listing.meeting)}</strong></div></div><p class="ticket-detail-price">${ticketPriceLabel(listing.price)}</p><p class="muted small">Buying this gives you a QR code. ${escapeHtml(ticketHost(listing))} scans it once at the door, and that scan marks the ticket used.</p><span class="small muted">${listing.quantityAvailable} left</span></div>`
       : `<div class="detail-block"><h3>Pickup details</h3><div class="info-row info-row-line"><span class="trust-icon">${icon("check")}</span><strong>${escapeHtml(listing.availability)}</strong></div><div class="info-row info-row-line"><span class="trust-icon">${icon("handshake")}</span><strong>Meet in public and message in the app</strong></div><div class="quantity-control"><button data-action="decrease-quantity" aria-label="Decrease quantity">${icon("minus")}</button><output>${state.quantity}</output><button data-action="increase-quantity" aria-label="Increase quantity">${icon("plus")}</button></div><span class="small muted" style="margin-left: 10px">${listing.quantityAvailable} available</span></div>`;
-  const moreFromBoard = onBoard ? allListings().filter((entry) => isChoreListing(entry) && entry.id !== listing.id).slice(0, 8) : [];
   const moreFromStore = store ? storeListings(store).filter((entry) => entry.id !== listing.id).slice(0, 8) : [];
   return `<div class="page-top-row"><button class="back-button" data-action="back-from-detail">${icon("chevron-left")} Back to ${backLabel}</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="listing/${listing.id}">${icon("share")} Share</button></div></div>
     <div class="detail-layout"><div class="detail-gallery">${listingVisual(listing, true)}<div class="small muted" style="margin-top: 10px">Demo imagery — the real product would use seller-approved portfolio or product photos.</div></div>
       <div class="detail-copy"><div class="eyebrow">${ticket ? kindLabel : `${escapeHtml(listing.category)} · ${kindLabel}`}</div><h1>${escapeHtml(listing.title)}</h1>${ticket ? `<p class="ticket-detail-when">${escapeHtml(ticketSchedule(listing))}</p>` : ""}<p class="lede">${escapeHtml(listing.description)}</p>
-        <div class="detail-actions"><button class="primary-button" data-action="start-checkout" data-id="${listing.id}" ${unavailable ? "disabled" : ""}>${buyLabel} ${unavailable ? "" : icon("arrow")}</button>${onBoard ? "" : `<button class="icon-button" data-action="message-seller" data-seller="${listing.sellerId}" data-listing="${listing.id}" aria-label="Message seller">${icon("chat")}</button>`}</div>
+        <div class="detail-actions"><button class="primary-button" data-action="start-checkout" data-id="${listing.id}" ${unavailable ? "disabled" : ""}>${buyLabel} ${unavailable ? "" : icon("arrow")}</button><button class="icon-button" data-action="message-seller" data-seller="${listing.sellerId}" data-listing="${listing.id}" aria-label="Message seller">${icon("chat")}</button></div>
         ${sellerCard}
         ${detailBlock}
       </div>
     </div>
-    ${moreFromBoard.length ? listingScrollSection("More on the Chore Board", moreFromBoard, { action: "open-chore-board", label: "Open Chore Board" }) : ""}
     ${moreFromStore.length ? listingScrollSection(`More from ${escapeHtml(store.name)}`, moreFromStore, { action: "open-store", id: store.id, label: "Visit store" }) : ""}`;
 }
 
@@ -437,8 +431,7 @@ function ticketPass(order, listing) {
 const BUYER_ORDER_STATUS = {
   service: { requested: "Awaiting confirmation", confirmed: "Upcoming", completed: "Completed", cancelled: "Cancelled", disputed: "Problem reported" },
   product: { requested: "Awaiting confirmation", confirmed: "Paid", ready: "Ready for pickup", completed: "Picked up", cancelled: "Cancelled", disputed: "Problem reported" },
-  ticket: { confirmed: "Valid", completed: "Used", cancelled: "Cancelled" },
-  chore: { paid: "Paid on Campus Connect" }
+  ticket: { confirmed: "Valid", completed: "Used", cancelled: "Cancelled" }
 };
 /** What the buyer can do with a ticket order, by where it stands. */
 function ticketOrderButtons(order) {
@@ -456,10 +449,6 @@ const buyerOrderWhen = (order) => (order.date ? slotLabel(order) : order.note ||
 function orderView(order) {
   if (!order) return missingView("order");
   const backToYou = `<button class="back-button" data-view="you">${icon("chevron-left")} Back to You</button>`;
-  if (order.kind === "chore") {
-    return `<div class="page-top-row">${backToYou}<button class="ghost-button" data-action="open-chore-board">Chore Board</button></div>
-      <div class="order-success"><div class="success-mark">${icon("check")}</div><div class="eyebrow">Paid on Campus Connect</div><h1>${escapeHtml(order.payer)} paid ${escapeHtml(order.payee)}.</h1><p class="lede">${dollars(order.total)} for ${escapeHtml(order.title)} stayed on the platform.</p><div class="order-detail-card"><div class="order-detail-row"><span>Chore</span><strong>${escapeHtml(order.title)}</strong></div><div class="order-detail-row"><span>When</span><strong>${escapeHtml(order.note)}</strong></div><div class="order-detail-row"><span>Paid to</span><strong>${escapeHtml(order.payee)}</strong></div></div><div class="button-row"><button class="primary-button" data-view="you">View activity</button><button class="ghost-button" data-action="open-chore-board">Back to the board</button></div></div>`;
-  }
   const listing = getListing(order.listingId);
   if (order.kind === "ticket") {
     return `<div class="page-top-row">${backToYou}<button class="ghost-button" data-view="tickets">More tickets</button></div>
@@ -698,7 +687,6 @@ function storesView() {
       <form class="global-search browse-page-search">${icon("search")}<input id="stores-search-input" data-live="storesQuery" type="search" value="${escapeHtml(state.storesQuery)}" placeholder="Search stores, sellers or what they sell" aria-label="Search stores" autocomplete="off" /></form>
       <div class="filter-bar">${filters.map((filter) => `<button type="button" class="category-chip ${activeFilter === filter.id ? "active" : ""}" data-action="set-stores-filter" data-filter="${escapeHtml(filter.id)}"><span class="category-chip-icon ${filter.dot}" aria-hidden="true">${icon(filter.icon, 22)}</span>${escapeHtml(filter.label)}</button>`).join("")}</div>
     </div>
-    ${choreBoardSection(state.storesQuery)}
     <div class="section-header" style="margin-top: 12px"><span class="result-count">${plural(filtered.length, "store")} · SDSU</span></div>
     ${filtered.length ? `<div class="store-grid">${filtered.map(storeCard).join("")}</div>` : `<div class="empty-state"><div class="empty-shape">⌁</div><h3>No stores match yet.</h3><p class="muted">Try another filter or search for something else.</p><button class="ghost-button" data-action="clear-stores-filters">Clear filters</button></div>`}`;
 }
@@ -724,8 +712,8 @@ function boardInquiryDetail(kind, item) {
   const backButton = (content, className) => `<button class="${className}" data-action="close-board-item">${content}</button>`;
   const facts = item.facts.map(([label, value]) => `<div class="info-row info-row-line"><span class="trust-icon">${icon("check")}</span><strong>${escapeHtml(label)} · ${escapeHtml(value)}</strong></div>`).join("");
   const messageAction = item.mine
-    ? `<p class="muted" style="margin: 23px 0">You posted this. Other students can message you about it.</p>`
-    : `<div class="detail-actions"><button class="primary-button" data-action="message-board-item" data-kind="${kind}" data-id="${item.id}">${icon("chat")} Message ${escapeHtml(firstName(item.poster))}</button></div>`;
+    ? `<p class="muted" style="margin: 23px 0 12px">You posted this. Students who write to you about it show up in your Inbox. It comes off the board by itself after 60 days.</p><div class="detail-actions"><button class="ghost-button" data-action="remove-board-post" data-kind="${kind}" data-id="${item.id}">Take down</button></div>`
+    : `<div class="detail-actions"><button class="primary-button" data-action="message-board-item" data-id="${item.id}">${icon("chat")} Message ${escapeHtml(firstName(item.poster))}</button></div>`;
   const others = (job ? data.jobs : data.housing).filter((entry) => entry.id !== item.id).slice(0, 8);
   const more = others.length
     ? `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>${job ? "More jobs" : "More places"}</h2>${backButton(`Back to ${backLabel} ${icon("arrow")}`, "text-button")}</div><div class="home-scroll-row listing-scroll-row">${others.map((entry) => contentBoardCard(entry, job ? "open-job" : "open-housing")).join("")}</div></section>`
@@ -734,7 +722,7 @@ function boardInquiryDetail(kind, item) {
     <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${item.accent}`, item.title, `<span class="detail-figure" aria-hidden="true">${item.emoji}</span>`)}</div>
       <div class="detail-copy"><div class="eyebrow">${escapeHtml(item.kicker)} · ${job ? "Job" : "Housing"}</div><h1>${escapeHtml(item.title)}</h1><span class="price">${escapeHtml(item.price)}</span>
         ${messageAction}
-        <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", item.initials, item.poster)}<div><div class="small muted">${item.mine ? "Posted by you" : job ? "Hiring contact" : "Posted by"}</div><div class="seller-name">${escapeHtml(item.poster)}</div><div class="seller-sub">${studentVerifiedPill()}</div></div></div></div>
+        <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", item.initials, item.posterId)}<div><div class="small muted">${item.mine ? "Posted by you" : job ? "Hiring contact" : "Posted by"}</div><div class="seller-name">${escapeHtml(item.poster)}</div><div class="seller-sub">${studentVerifiedPill()}</div></div></div></div>
         <div class="detail-block board-role"><div class="board-description"><h3>Description</h3><p>${escapeHtml(item.summary)}</p></div><div class="board-facts"><h3>${job ? "The role" : "The place"}</h3>${facts}<div class="trust-note">Keep the conversation in the app. ${job ? "Pay and the schedule get confirmed in messages." : "Rent, dates, and a tour get confirmed in messages."}</div></div></div>
       </div>
     </div>
@@ -745,7 +733,7 @@ function jobPostForm() {
   return `<form class="form-card job-post-form" data-form="post-job">
     <div class="eyebrow">Post a job</div>
     <h3>Put a job on the board.</h3>
-    <p class="muted small">Other students on campus can see it. This demo keeps the post for this session only.</p>
+    <p class="muted small">Other SDSU students can see it and message you. It stays up for 60 days, or until you take it down.</p>
     <div class="form-grid">
       <div class="field"><label for="job-title">Job title</label><input id="job-title" name="title" required maxlength="60" placeholder="e.g. Move-in helper" /></div>
       <div class="field"><label for="job-where">Where</label><input id="job-where" name="where" required maxlength="60" placeholder="e.g. Tenochca" /></div>
@@ -763,7 +751,9 @@ function jobBoardView() {
   const jobs = data.jobs.filter((job) => matchesSearch(state.jobQuery, job.title, job.kicker, job.meta, job.summary, job.poster, job.price));
   const grid = jobs.length
     ? `<div class="board-grid">${jobs.map((job) => contentBoardCard(job, "open-job")).join("")}</div>`
-    : `<div class="empty-state"><div class="empty-shape">⌕</div><h3>No jobs match that.</h3><p class="muted">Try a role, a workplace, or part of the pay.</p></div>`;
+    : data.jobs.length
+      ? `<div class="empty-state"><div class="empty-shape">⌕</div><h3>No jobs match that.</h3><p class="muted">Try a role, a workplace, or part of the pay.</p></div>`
+      : `<div class="empty-state"><div class="empty-shape">⌁</div><h3>No jobs on the board yet.</h3><p class="muted">Know of one? Post it and other students can message you.</p></div>`;
   return `<div class="browse-header"><div><div class="eyebrow">Campus work</div><h1>Job Board</h1></div><button class="primary-button" data-action="toggle-job-form">${state.jobFormOpen ? "Close" : `Post a job ${icon("plus")}`}</button></div>
     <form class="global-search browse-page-search">${icon("search")}<input id="job-search-input" data-live="jobQuery" type="search" value="${escapeHtml(state.jobQuery)}" placeholder="Search jobs" aria-label="Search jobs" autocomplete="off" /></form>
     ${state.jobFormOpen ? jobPostForm() : ""}
@@ -774,7 +764,7 @@ function housingPostForm() {
   return `<form class="form-card job-post-form" data-form="post-housing">
     <div class="eyebrow">Post a place</div>
     <h3>Put a room or sublease on the board.</h3>
-    <p class="muted small">Other students on campus can see it. This demo keeps the post for this session only.</p>
+    <p class="muted small">Other SDSU students can see it and message you. It stays up for 60 days, or until you take it down.</p>
     <div class="form-grid">
       <div class="field"><label for="housing-title">What's available</label><input id="housing-title" name="title" required maxlength="60" placeholder="e.g. Private room in a 3-bedroom" /></div>
       <div class="field"><label for="housing-place">Neighborhood</label><input id="housing-place" name="place" required maxlength="60" placeholder="e.g. College Area" /></div>
@@ -794,7 +784,7 @@ function realEstateAgentCard(agent) {
         <div class="listing-title">${escapeHtml(agent.name)}</div>
         <div class="listing-meta-line muted small">${escapeHtml(shortCardText(agent.summary))}</div>
         <div class="seller-line">${personMark("span", "mini-avatar", agent.initials, agent.id)}<span class="seller-name">${escapeHtml(agent.brokerage)}</span></div>
-        <div class="listing-meta"><span class="price">Free <small>/ consult</small></span><span class="rating">${icon("star", 14)} ${escapeHtml(agent.rating)} <span class="muted">(${agent.reviews})</span></span></div>
+        <div class="listing-meta"><span class="muted small">${escapeHtml(agent.focus)}</span></div>
       </div>
     </button>
   </article>`;
@@ -826,15 +816,15 @@ function realEstateAgentSection(agents = data.agents, title = "Real estate agent
 }
 
 function agentInquiryDetail(agent) {
-  const facts = [["Focus", agent.focus], ["Brokerage", agent.brokerage], ["Consult", "Free"]]
+  const facts = [["Focus", agent.focus], ["Brokerage", agent.brokerage]]
     .map(([label, value]) => `<div class="info-row info-row-line"><span class="trust-icon">${icon("check")}</span><strong>${escapeHtml(label)} · ${escapeHtml(value)}</strong></div>`).join("");
   const others = data.agents.filter((entry) => entry.id !== agent.id);
   return `<div class="page-top-row"><button class="back-button" data-action="close-board-item">${icon("chevron-left")} Back to Housing</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="agent/${agent.id}">${icon("share")} Share</button></div></div>
     <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${agent.accent}`, agent.name, "", { after: `<span class="agent-badge agent-badge-detail">${icon("home", 13)} Licensed agent</span>` })}</div>
-      <div class="detail-copy"><div class="eyebrow">${escapeHtml(agent.brokerage)} · Agent</div><h1>${escapeHtml(agent.name)}</h1><span class="price">Free consult</span>
-        <div class="detail-actions"><button class="primary-button" data-action="message-agent" data-id="${agent.id}">${icon("chat")} Message ${escapeHtml(firstName(agent.name))}</button></div>
+      <div class="detail-copy"><div class="eyebrow">${escapeHtml(agent.brokerage)} · Agent</div><h1>${escapeHtml(agent.name)}</h1>
+        <div class="detail-actions"><a class="primary-button" href="${escapeHtml(agent.website)}" target="_blank" rel="noopener noreferrer">Visit site ${icon("arrow")}</a></div>
         <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", agent.initials, agent.id)}<div><div class="small muted">Real estate agent</div><div class="seller-name">${escapeHtml(agent.name)}</div><div class="seller-sub">${escapeHtml(agent.brokerage)}</div></div></div></div>
-        <div class="detail-block board-role"><div class="board-description"><h3>Description</h3><p>${escapeHtml(agent.summary)}</p></div><div class="board-facts"><h3>How they help</h3>${facts}<div class="trust-note">Keep the conversation in the app. Tours and next steps get confirmed in messages.</div></div></div>
+        <div class="detail-block board-role"><div class="board-description"><h3>Description</h3><p>${escapeHtml(agent.summary)}</p></div><div class="board-facts"><h3>How they help</h3>${facts}<div class="trust-note">Agents are not students and are not on Campus Connect. You contact them through their own site.</div></div></div>
       </div>
     </div>
     ${realEstateAgentSection(others, "More agents")}`;
@@ -852,7 +842,9 @@ function housingView() {
     ${state.housingFormOpen ? housingPostForm() : ""}
     ${realEstateAgentSection()}
     ${apartmentSection()}
-    <section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>Posted by students</h2></div><div class="board-grid">${homes.map((home) => contentBoardCard(home, "open-housing")).join("")}</div></section>`;
+    <section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>Posted by students</h2></div>${homes.length
+      ? `<div class="board-grid">${homes.map((home) => contentBoardCard(home, "open-housing")).join("")}</div>`
+      : `<div class="empty-state"><div class="empty-shape">⌁</div><h3>No rooms or subleases posted yet.</h3><p class="muted">Have a room to fill? Post it and other students can message you.</p></div>`}</section>`;
 }
 
 /* ---------- Tickets ---------- */
@@ -876,24 +868,18 @@ function ticketPostForm(kind) {
   </form>`;
 }
 
+/** Someone else's post has a button that opens a private conversation in the Inbox. Your own has one that takes it down. */
 function ticketBubble(post) {
+  const button = post.mine
+    ? `<button type="button" class="ticket-dm-button" data-action="remove-board-post" data-kind="ticket" data-id="${escapeHtml(post.id)}" aria-label="Take down your post">${icon("close", 15)}</button>`
+    : `<button type="button" class="ticket-dm-button" data-action="message-board-item" data-id="${escapeHtml(post.id)}" aria-label="Message ${escapeHtml(post.name)}">${icon("send", 15)}</button>`;
   return `<div class="message ${post.mine ? "me" : "them"} ticket-post">
     <span class="ticket-post-copy"><span class="ticket-post-name">${escapeHtml(post.name)}</span><span>${escapeHtml(ticketPostLine(post))}</span></span>
-    <button type="button" class="ticket-dm-button" data-action="open-ticket-dm" data-id="${escapeHtml(post.id)}" aria-label="Private message">${icon("send", 15)}</button>
+    ${button}
   </div>`;
 }
 
-function ticketDmView(post) {
-  return `<section class="chat-panel ticket-chat">
-    <div class="chat-header"><button class="back-button" type="button" data-action="close-ticket-dm">${icon("chevron-left")} Back</button><div class="chat-person">${personMark("span", "mini-avatar", post.initials, post.name)}<div><strong>${escapeHtml(post.name)}</strong><span>${escapeHtml(ticketPostLine(post))}</span></div></div></div>
-    <div class="chat-messages">${messageBubbles(post.messages, `This is a private message with ${post.name}.`)}</div>
-    <form class="chat-composer" data-form="send-ticket-dm"><textarea name="message" placeholder="Private message…" aria-label="Private message" rows="1"></textarea><button class="primary-button" type="submit" aria-label="Send message">${icon("arrow")}</button></form>
-  </section>`;
-}
-
 function ticketChat() {
-  const dm = data.ticketPosts.find((post) => post.id === state.ticketDmPostId);
-  if (dm) return ticketDmView(dm);
   const kind = state.ticketPostKind;
   const posts = data.ticketPosts.filter((post) => matchesSearch(state.ticketQuery, post.name, ticketPostLine(post)));
   const bubbles = posts.length ? posts.map(ticketBubble).join("") : `<p class="muted small">${state.ticketQuery.trim() ? "No posts match that." : "No posts yet."}</p>`;
@@ -928,163 +914,6 @@ function ticketsView() {
     </div>
     ${ticketChat()}
   </div>`;
-}
-
-/* ---------- Chore Board ---------- */
-
-const CHORE_BOARD_TAGLINE = "Post a chore or pick one up. Open to every student.";
-/** Flip this to show the Chore Board again. Views, data, and actions stay either way. */
-const SHOW_CHORE_BOARD = false;
-
-function choreBoardBack() {
-  if (state.boardReturn === "stores") return { view: "stores", label: "Stores" };
-  if (state.boardReturn === "you") return { view: "you", label: "You" };
-  if (state.boardReturn === "home") return { view: "home", label: "Home" };
-  return { view: "book", label: "Book" };
-}
-
-function choreBoardCard() {
-  if (!SHOW_CHORE_BOARD) return "";
-  return `<article class="chore-board-card">
-    <button type="button" class="chore-board-button" data-action="open-chore-board" aria-label="Open Chore Board">
-      <span class="chore-board-banner" aria-hidden="true"></span>
-      <span class="chore-board-body">
-        <span class="chore-board-name">Chore Board</span>
-        <span class="chore-board-tagline">${CHORE_BOARD_TAGLINE}</span>
-      </span>
-    </button>
-  </article>`;
-}
-
-function choreBoardSection(query) {
-  if (!SHOW_CHORE_BOARD) return "";
-  if (!matchesSearch(query, "Chore Board", CHORE_BOARD_TAGLINE, ...data.chores.flatMap((chore) => [chore.title, chore.summary, chore.poster]))) return "";
-  return `<section class="section section-home-shelf section-chore-board">${choreBoardCard()}</section>`;
-}
-
-function choreSlipMeta(chore) {
-  if (chore.status === "paid") return `Paid on Campus Connect · ${chore.meta}`;
-  if (chore.status === "approved") return `Approved · pay on Campus Connect · ${chore.meta}`;
-  if (chore.status === "requested" && chore.mine) return `Needs your approval · ${chore.meta}`;
-  if (chore.status === "requested") return `Waiting on ${firstName(chore.poster)} · ${chore.meta}`;
-  if (chore.mine) return `Your post · ${chore.meta}`;
-  return chore.meta;
-}
-
-function choreSlip(chore) {
-  const quiet = chore.status !== "open";
-  const label = `Open ${chore.title}, ${choreSlipMeta(chore)}`;
-  return `<button type="button" class="chore-slip${quiet ? " is-quiet" : ""}" data-action="open-chore" data-id="${escapeHtml(chore.id)}" aria-label="${escapeHtml(label)}">
-    <span class="chore-slip-price">${escapeHtml(chore.amount)}</span>
-    <span class="chore-slip-copy">
-      <span class="chore-slip-title">${escapeHtml(chore.title)}</span>
-      <span class="chore-slip-meta">${escapeHtml(choreSlipMeta(chore))}</span>
-    </span>
-    <span class="chore-slip-go" aria-hidden="true">${icon("arrow", 26)}</span>
-  </button>`;
-}
-
-function chorePostForm() {
-  return `<form class="form-card job-post-form" data-form="post-chore">
-    <div class="eyebrow">Post a chore</div>
-    <h3>Ask another student to do it.</h3>
-    <p class="muted small">This post stays on your student account.</p>
-    <div class="form-grid">
-      <div class="field"><label for="chore-title">What you need</label><input id="chore-title" name="title" required maxlength="60" placeholder="e.g. Take a package to the mailroom" /></div>
-      <div class="field"><label for="chore-when">When</label><input id="chore-when" name="when" required maxlength="60" placeholder="e.g. Today after 4" /></div>
-      <div class="field"><label for="chore-where">Where</label><input id="chore-where" name="where" required maxlength="60" placeholder="e.g. Zura lobby" /></div>
-      <div class="field"><label for="chore-pay">Pay</label><input id="chore-pay" name="pay" required maxlength="24" placeholder="e.g. $15" /></div>
-      <div class="field full"><label for="chore-summary">Details</label><textarea id="chore-summary" name="summary" required maxlength="240" placeholder="What should a student know before they pick it up?"></textarea></div>
-    </div>
-    <div class="button-row" style="margin-top: 16px"><button class="primary-button" type="submit">Post chore ${icon("arrow")}</button><button class="ghost-button" type="button" data-action="toggle-chore-form">Cancel</button></div>
-  </form>`;
-}
-
-function choreSection(title, chores) {
-  if (!chores.length) return "";
-  return `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>${title}</h2></div><div class="chore-slip-grid">${chores.map(choreSlip).join("")}</div></section>`;
-}
-
-/** What the chore page asks of you, which depends on who posted it and how far along it is. */
-function choreOfferActions(chore) {
-  const poster = escapeHtml(chore.poster);
-  const posterFirst = escapeHtml(firstName(chore.poster));
-  const taker = escapeHtml(chore.offerName);
-  const amount = escapeHtml(chore.amount);
-  const note = (text) => `<p class="muted" style="margin: 23px 0">${text}</p>`;
-  if (chore.status === "open") {
-    return chore.mine
-      ? note(`You posted this. When a student says they can take it, you approve them and pay ${amount} through Campus Connect.`)
-      : `<div class="detail-actions"><button class="primary-button" data-action="offer-chore" data-id="${chore.id}">I can take this chore</button></div><p class="muted small">${posterFirst} approves you first. Then they pay ${amount} through Campus Connect.</p>`;
-  }
-  if (chore.status === "requested") {
-    return chore.mine
-      ? `<p class="muted" style="margin: 23px 0 12px">${taker} says they can take this chore.</p><div class="detail-block chore-approval"><h3>Your approval</h3><p>You posted this chore. Approving opens a ${amount} payment through Campus Connect.</p><button class="primary-button" data-action="approve-chore" data-id="${chore.id}">Approve</button></div>`
-      : note(`You told ${posterFirst} you can take this chore. Waiting for ${poster} to approve. The ${amount} is paid through Campus Connect when they do.`);
-  }
-  if (chore.status === "approved") {
-    return `<div class="detail-actions"><button class="primary-button" data-action="open-chore-pay" data-id="${chore.id}">Pay ${amount} through Campus Connect ${icon("arrow")}</button></div><p class="muted small">You approved ${taker}. The money moves on Campus Connect.</p>`;
-  }
-  return note(`${poster} paid ${taker} ${amount} through Campus Connect.`);
-}
-
-function choreDetail(chore) {
-  const facts = chore.facts.map(([label, value]) => `<div class="info-row info-row-line"><span class="trust-icon">${icon("check")}</span><strong>${escapeHtml(label)} · ${escapeHtml(value)}</strong></div>`).join("");
-  const others = data.chores.filter((entry) => entry.id !== chore.id && !entry.mine && entry.status === "open").slice(0, 8);
-  const more = others.length
-    ? `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>More on the board</h2><button class="text-button" data-action="close-chore">Back to Chore Board ${icon("arrow")}</button></div><div class="chore-board"><div class="chore-slip-grid">${others.map(choreSlip).join("")}</div></div></section>`
-    : "";
-  return `<div class="page-top-row"><button class="back-button" data-action="close-chore">${icon("chevron-left")} Back to Chore Board</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="chore/${chore.id}">${icon("share")} Share</button></div></div>
-    <div class="detail-layout"><div class="detail-gallery"><div class="detail-visual ${chore.accent}"><span class="detail-figure" aria-hidden="true">${chore.emoji}</span></div></div>
-      <div class="detail-copy"><div class="eyebrow">Chore Board · ${chore.mine ? "Your post" : "Student post"}</div><h1>${escapeHtml(chore.title)}</h1><span class="price">${escapeHtml(chore.price)}</span>
-        ${choreOfferActions(chore)}
-        <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", chore.initials, chore.poster)}<div><div class="small muted">${chore.mine ? "Posted by you" : "Posted by"}</div><div class="seller-name">${escapeHtml(chore.poster)}</div><div class="seller-sub">${studentVerifiedPill()}</div></div></div></div>
-        <div class="detail-block board-role"><div class="board-description"><h3>Description</h3><p>${escapeHtml(chore.summary)}</p></div><div class="board-facts"><h3>The chore</h3>${facts}<div class="trust-note">The poster approves a student, then pays them through Campus Connect.</div></div></div>
-      </div>
-    </div>
-    ${more}`;
-}
-
-function choreBookings() {
-  return allListings().filter(isChoreListing);
-}
-
-function yourChoreSections() {
-  if (!SHOW_CHORE_BOARD) return "";
-  const posted = data.chores.filter((chore) => chore.mine);
-  const waiting = data.chores.filter((chore) => chore.offeredByMe && chore.status !== "paid");
-  const paid = data.chores.filter((chore) => chore.offeredByMe && chore.status === "paid");
-  return `${choreSection("Chores you posted", posted)}${choreSection("Waiting on approval", waiting)}${choreSection("Paid through Campus Connect", paid)}`;
-}
-
-function choreBoardView() {
-  const selected = data.chores.find((chore) => chore.id === state.selectedChoreId);
-  if (selected) return choreDetail(selected);
-  const back = choreBoardBack();
-  const open = data.chores.filter((chore) => !chore.mine && chore.status === "open");
-  const bookings = choreBookings();
-  const openGrid = open.length
-    ? `<div class="chore-slip-grid">${open.map(choreSlip).join("")}</div>`
-    : `<div class="empty-state"><div class="empty-shape">⌁</div><h3>Nothing is waiting on the board.</h3><p class="muted">Post a chore if you need something done.</p></div>`;
-  const bookingSection = bookings.length
-    ? `<section class="section section-home-shelf section-chore-bookings"><div class="section-header section-header-shelf"><h2>Book a chore</h2></div><div class="listing-grid listing-grid-recommended">${bookings.map(listingCard).join("")}</div></section>`
-    : "";
-  return `<div class="page-top-row"><button class="back-button" data-view="${back.view}">${icon("chevron-left")} Back to ${back.label}</button></div>
-    <div class="browse-header"><div><div class="eyebrow">${back.label}</div><h1>Chore Board</h1></div><button class="primary-button chore-post-button" data-action="toggle-chore-form">${state.choreFormOpen ? "Close" : "Post a chore"} ${state.choreFormOpen ? "" : icon("plus")}</button></div>
-    ${state.choreFormOpen ? chorePostForm() : ""}
-    <section class="chore-board" aria-label="Open chores">${openGrid}</section>
-    ${bookingSection}`;
-}
-
-function chorePayView(chore) {
-  if (!chore) return choreBoardView();
-  const taker = escapeHtml(chore.offerName);
-  const total = dollars(amountValue(chore.amount));
-  return `<div class="page-top-row"><button class="back-button" data-action="back-from-chore-pay">${icon("chevron-left")} Back to chore</button><span class="small muted">Campus Connect payment · demo only</span></div>
-    <div class="checkout-layout"><section class="checkout-panel"><div class="eyebrow">Chore Board</div><h1>Pay through Campus Connect.</h1><p class="lede">${escapeHtml(firstName(chore.poster))} approved ${taker}. This payment stays on the platform.</p>
-      <div class="step-list"><div class="step"><span class="step-number">1</span><div><strong>${escapeHtml(chore.title)}</strong><p>${escapeHtml(chore.meta)}</p></div></div><div class="step"><span class="step-number">2</span><div><strong>Pay ${taker}</strong><p>${escapeHtml(chore.poster)} is paying the student who is taking the chore.</p></div></div><div class="step"><span class="step-number">3</span><div><strong>On Campus Connect</strong><p>The money does not move outside the app.</p></div></div></div>
-      <div class="button-row stretch"><button class="primary-button" data-action="confirm-chore-pay" data-id="${chore.id}">Confirm & pay ${total} ${icon("arrow")}</button></div>
-    </section><aside class="summary-card"><div class="summary-visual"><div class="summary-thumb ${chore.accent}">${chore.emoji}</div><div><strong>${escapeHtml(chore.title)}</strong><div class="small muted">To ${taker}</div></div></div><div class="summary-line"><span>Chore</span><strong>${total}</strong></div><div class="summary-line"><span>Platform fee</span><strong>$0.00</strong></div><div class="summary-line total"><span>Total</span><strong>${total}</strong></div><p class="checkout-disclaimer">This is a prototype only. No real account, order or payment is created.</p></aside></div>`;
 }
 
 /* ---------- Inbox ---------- */
@@ -1215,12 +1044,10 @@ function youView() {
       <div class="activity-list">${orderRows || `<p class="muted small">Nothing yet. Bookings and purchases show up here.</p>`}</div>
     </div>
     <div class="quick-actions profile-help-grid">
-      ${SHOW_CHORE_BOARD ? `<button class="quick-action" data-action="open-chore-board"><span class="trust-icon">${icon("handshake")}</span><strong>Chore Board</strong><span>Post or pick up a chore</span></button>` : ""}
       <button class="quick-action" data-view="inbox"><span class="trust-icon">${icon("chat")}</span><strong>Inbox</strong><span>${unread ? plural(unread, "unread message") : "No unread messages"}</span></button>
       <button class="quick-action" data-action="open-help"><span class="trust-icon">${icon("help")}</span><strong>Get help</strong><span>Support and safety</span></button>
     </div>
   </section>
-  ${yourChoreSections()}
   <section class="section sell-hero profile-sell-hero"><div class="eyebrow">For student sellers</div><h2>Turn what you know into what you earn.</h2><div class="button-row"><button class="primary-button" data-action="switch-mode">Open Seller Hub ${icon("arrow")}</button><button class="ghost-button sell-hero-ghost" data-view="sell">List something quickly</button></div></section>`;
 }
 
@@ -1344,8 +1171,6 @@ Object.assign(VIEWS, {
   jobs: jobBoardView,
   housing: housingView,
   tickets: ticketsView,
-  "chore-board": choreBoardView,
-  "chore-pay": () => chorePayView(data.chores.find((chore) => chore.id === state.selectedChoreId)),
   inbox: inboxView,
   you: youView,
   settings: settingsView,
@@ -1356,6 +1181,5 @@ Object.assign(VIEWS, {
 Object.assign(NAV_PARENTS, {
   search: "home",
   settings: "you",
-  "chore-board": () => state.boardReturn || "book",
   "school-service": () => (["search", "home"].includes(state.schoolServiceReturn) ? "home" : "book")
 });

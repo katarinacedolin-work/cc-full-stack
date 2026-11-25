@@ -183,42 +183,6 @@ const api = (() => {
 
   const NEXT_STATUSES = { requested: ["confirmed", "cancelled"], confirmed: ["ready", "completed", "cancelled"], ready: ["completed", "cancelled"] };
 
-  /* ---------- Chores ---------- */
-
-  const CHORE_APPROVAL_DELAY = 1600;
-
-  function recordChorePayment(chore) {
-    chore.status = "paid";
-    const order = {
-      id: newId("order"), kind: "chore", choreId: chore.id, title: chore.title, emoji: chore.emoji, accent: chore.accent, status: "paid",
-      note: chore.meta, total: amountValue(chore.amount), payer: chore.poster, payee: chore.offerName, placedAt: now()
-    };
-    db.buyer.orders.unshift(order);
-    return order;
-  }
-
-  /** Nobody is on the other end of a seed chore, so the poster "approves and pays" a moment after an offer. */
-  function scheduleChoreApproval(chore) {
-    window.setTimeout(() => {
-      if (chore.status !== "requested") return;
-      const order = recordChorePayment(chore);
-      const thread = db.buyer.conversations.find((conversation) => conversation.id === `chore-${chore.id}`);
-      thread?.messages.push({ from: "them", text: `Approved. I paid ${chore.amount} through Campus Connect.`, at: now() });
-      emit({ type: "chore-paid", choreId: chore.id, orderId: order.id, poster: chore.poster });
-    }, CHORE_APPROVAL_DELAY);
-  }
-
-  db.chores.filter((chore) => chore.offeredByMe && chore.status === "requested").forEach(scheduleChoreApproval);
-
-  /** A post on the job, housing or chore board, built from the short form the poster fills in. */
-  function boardPost(prefix, fields, { emoji, accent, kicker, facts }) {
-    const [first, second, price] = facts.map(([, key]) => fields[key]);
-    return {
-      id: newId(prefix), title: fields.title, kicker, meta: `${first} · ${second}`, price, accent, emoji, summary: fields.summary,
-      poster: myName(), initials: initialsOf(myName()), mine: true, facts: facts.map(([label, key]) => [label, fields[key]])
-    };
-  }
-
   /* ---------- Listings ---------- */
 
   const CERTIFICATION_BY_CATEGORY = { Learn: "tutor", Create: "creator", Beauty: "nail tech", Tech: "editor", Help: "campus helper", Events: "event photographer" };
@@ -272,6 +236,38 @@ const api = (() => {
     if (!Object.keys(switches).length) return false;
     await ccFetch("/settings", { method: "PATCH", body: switches });
     return true;
+  }
+
+  /* ---------- Boards and the directory ---------- */
+
+  /**
+   * School services, apartment buildings and agents arrive in one request, and the team changes them
+   * rarely, so they are asked for once per page. A failed request is tried again the next time.
+   */
+  let directory = null;
+  function getDirectory() {
+    directory ||= ccFetch("/directory").catch((error) => {
+      console.error(error);
+      directory = null;
+      return { schoolServices: [], apartments: [], agents: [] };
+    });
+    return directory;
+  }
+
+  /** What is on one board ("job", "housing" or "ticket"), newest first. Empty, rather than the page failing, when it can't be loaded. */
+  async function getBoard(kind) {
+    try {
+      const { posts } = await ccFetch(`/board-posts?kind=${kind}`);
+      return posts;
+    } catch (error) {
+      console.error(error);
+      return [];
+    }
+  }
+
+  async function postToBoard(kind, fields) {
+    const { post } = await ccFetch("/board-posts", { method: "POST", body: { ...fields, kind } });
+    return post;
   }
 
   /* ---------- Changes that arrive on their own ---------- */
@@ -336,9 +332,10 @@ const api = (() => {
     /* Catalog */
 
     getCategories: () => db.categories,
-    getSchoolServices: () => db.schoolServices,
-    getAgents: () => db.agents,
-    getApartments: () => db.apartments,
+    /** What the team lists by hand. An agent is { id, name, initials, brokerage, focus, summary, website, accent }. */
+    getSchoolServices: async () => (await getDirectory()).schoolServices,
+    getAgents: async () => (await getDirectory()).agents,
+    getApartments: async () => (await getDirectory()).apartments,
     getSellers: () => db.sellers,
     getStores: async () => {
       try {
@@ -413,73 +410,27 @@ const api = (() => {
 
     /* Boards */
 
-    getJobs: () => db.jobs,
-    getHousing: () => db.housing,
-    getChores: () => db.chores,
-    getTicketPosts: () => db.ticketPosts,
+    /**
+     * What students posted. Nothing is bought through a post; people message whoever wrote it.
+     * A job or a place is { id, title, kicker, meta, price, accent, emoji, summary, facts: [[label, value]],
+     * poster, posterId, initials, mine, postedAt }.
+     * A ticket post is { id, kind: "resell" | "request", event, price, name, posterId, initials, accent, mine, postedAt }.
+     */
+    getJobs: () => getBoard("job"),
+    getHousing: () => getBoard("housing"),
+    getTicketPosts: () => getBoard("ticket"),
 
-    postJob: (fields) => {
-      requireAll(fields, ["title", "where", "schedule", "pay", "summary"], "Fill in the title, where, schedule, pay, and description.");
-      db.jobs.unshift(boardPost("job", fields, { emoji: "📌", accent: "coral", kicker: "Posted by you", facts: [["Schedule", "schedule"], ["Where", "where"], ["Pay", "pay"]] }));
-      return db.jobs[0];
-    },
+    /** `fields`: title, where, schedule, pay, summary. */
+    postJob: (fields) => postToBoard("job", fields),
 
-    postHousing: (fields) => {
-      requireAll(fields, ["title", "place", "dates", "rent", "summary"], "Fill in the place, neighborhood, dates, rent, and details.");
-      db.housing.unshift(boardPost("home", fields, { emoji: "🏠", accent: "butter", kicker: "Posted by you", facts: [["Dates", "dates"], ["Place", "place"], ["Rent", "rent"]] }));
-      return db.housing[0];
-    },
+    /** `fields`: title, place, dates, rent, summary. */
+    postHousing: (fields) => postToBoard("housing", fields),
 
-    postChore: (fields) => {
-      requireAll(fields, ["title", "when", "where", "pay", "summary"], "Fill in the chore, when, where, pay, and details.");
-      const amount = fields.pay.match(/\$\d+(?:\.\d+)?/)?.[0] || fields.pay;
-      db.chores.unshift({ ...boardPost("chore", fields, { emoji: "📌", accent: "coral", facts: [["When", "when"], ["Where", "where"], ["Pay", "pay"]] }), amount, status: "open" });
-      return db.chores[0];
-    },
+    /** `kind` is "resell" (with a price) or "request". */
+    postTicket: ({ kind, event, price }) => postToBoard("ticket", { ticketKind: kind, event, price }),
 
-    /** Tells the poster you can take their chore. They approve and pay later, which arrives through `subscribe`. */
-    offerOnChore: (id) => {
-      const chore = find(db.chores, id, "chore");
-      if (chore.mine || chore.status !== "open") fail("That chore is not open any more.");
-      Object.assign(chore, { status: "requested", offeredByMe: true, offerName: myName() });
-      const threadId = `chore-${chore.id}`;
-      const thread = db.buyer.conversations.find((conversation) => conversation.id === threadId)
-        || startConversation(db.buyer, { id: threadId, name: chore.poster, initials: chore.initials, accent: chore.accent, context: chore.title });
-      thread.messages.push({ from: "me", text: "I can take this chore.", at: now() });
-      scheduleChoreApproval(chore);
-      return chore;
-    },
-
-    approveChore: (id) => {
-      const chore = find(db.chores, id, "chore");
-      if (!chore.mine || !["requested", "approved"].includes(chore.status)) fail("There is no offer to approve on that chore.");
-      chore.status = "approved";
-      return chore;
-    },
-
-    /** Pays the student you approved. Returns the order that records the payment. */
-    payForChore: (id) => {
-      const chore = find(db.chores, id, "chore");
-      if (!chore.mine || chore.status !== "approved") fail("Approve a student before you pay.");
-      return recordChorePayment(chore);
-    },
-
-    postTicket: ({ kind, event, price }) => {
-      const resell = kind === "resell";
-      const amount = Number(String(price ?? "").replace(/[^0-9.]/g, ""));
-      if (!event || (resell && !(amount > 0))) fail(resell ? "Add the event and a price." : "Add the event.");
-      const post = { id: newId("tpost"), kind: resell ? "resell" : "request", event, name: myName(), initials: initialsOf(myName()), accent: "sky", mine: true, messages: [] };
-      if (resell) post.price = String(Math.round(amount * 100) / 100);
-      db.ticketPosts.push(post);
-      return post;
-    },
-
-    sendTicketMessage: (postId, text) => {
-      const post = find(db.ticketPosts, postId, "post");
-      if (!text) fail("Write a message first.");
-      post.messages.push({ from: "me", text, at: now() });
-      return post;
-    },
+    /** Takes one of your own posts off its board. Conversations about it stay in the inbox. */
+    removeBoardPost: async (id) => { await ccFetch(`/board-posts/${encodeURIComponent(id)}`, { method: "DELETE" }); },
 
     /* Account */
 
@@ -611,12 +562,12 @@ const api = (() => {
     },
 
     /**
-     * Finds or starts the conversation about an order ({ orderId }), about a listing ({ listingId }) or with a
-     * seller ({ sellerId }). The other person hears nothing until the first message is sent.
+     * Finds or starts the conversation about an order ({ orderId }), about a listing ({ listingId }), about a
+     * job, housing or ticket post ({ postId }), or with a seller ({ sellerId }). The other person hears nothing
+     * until the first message is sent.
      */
-    openConversation: async ({ orderId, listingId, sellerId, agentId, jobId, housingId }) => {
-      if (agentId || jobId || housingId) fail("Messages about board posts open when the boards go live.");
-      const about = orderId ? { orderId } : listingId ? { listingId } : { sellerId };
+    openConversation: async ({ orderId, listingId, postId, sellerId }) => {
+      const about = orderId ? { orderId } : listingId ? { listingId } : postId ? { postId } : { sellerId };
       const { conversation } = await ccFetch("/conversations", { method: "POST", body: about });
       return conversation;
     },
@@ -647,9 +598,10 @@ const api = (() => {
 
     /* Support */
 
-    createSupportCase: ({ topic, message }) => {
+    /** Sends a request to the Campus Connect team. `orderId` ties it to an order. */
+    createSupportCase: async ({ topic, message, orderId }) => {
       if (!message) fail("Tell us a little about what happened.");
-      db.supportCases.push({ id: newId("case"), topic, message, from: me().id, at: now() });
+      await ccFetch("/support", { method: "POST", body: { topic, message, orderId } });
     },
 
     submitReport: ({ reason, message }) => {
@@ -858,7 +810,6 @@ const api = (() => {
      * Events:
      *   { type: "changed" }  a message, a notification or an order of the signed-in student changed. The page
      *                        asks the server every few seconds while it is in front, and reloads what it shows.
-     *   { type: "chore-paid", choreId, orderId, poster }  mock only.
      */
     subscribe: (listener) => {
       listeners.add(listener);
