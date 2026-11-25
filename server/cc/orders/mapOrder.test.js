@@ -112,4 +112,25 @@ describe('toCampusOrder', () => {
       can: expect.objectContaining({ markDelivered: true, markReceived: true, cancel: true }),
     });
   });
+
+  it('shows a booking as a campus date and clock', () => {
+    const booked = tx({
+      attributes: { processName: 'default-booking', lastTransition: 'transition/accept' },
+      relationships: { booking: { data: { id: new UUID('booking-1'), type: 'booking' } } },
+    });
+    const booking = {
+      id: new UUID('booking-1'),
+      type: 'booking',
+      attributes: {
+        start: new Date('2026-12-02T00:00:00.000Z'),
+        end: new Date('2026-12-02T01:00:00.000Z'),
+      },
+    };
+    expect(toCampusOrder(booked, [...included, booking])).toMatchObject({
+      kind: 'service',
+      status: 'confirmed',
+      date: '2026-12-01',
+      time: '4:00 PM',
+    });
+  });
 });

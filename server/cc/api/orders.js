@@ -10,12 +10,15 @@ const {
   fetchCommission,
 } = require('../../api-util/sdk');
 const { transactionLineItems } = require('../../api-util/lineItems');
+const { constructValidLineItems } = require('../../api-util/lineItemHelpers');
 const { getIntegrationSdk } = require('../integrationSdk');
 const { httpError } = require('../auth/httpError');
+const log = require('../../log');
 const db = require('../db');
+const { parseSlot, durationMinutes } = require('../time');
 const { toCampusOrder, BOOKING_PROCESS, PURCHASE_PROCESS } = require('../orders/mapOrder');
 
-const { UUID, Money } = types;
+const { UUID } = types;
 
 const TX_INCLUDE = {
   expand: true,
@@ -57,6 +60,13 @@ const getFlags = async transactionId => {
   return { readyForPickup: Boolean(rows[0]?.ready_for_pickup) };
 };
 
+// For reading an order: without Postgres it still loads, minus the ready-for-pickup notice.
+const getFlagsOrNone = transactionId =>
+  getFlags(transactionId).catch(e => {
+    log.error(e, 'cc-order-flags-failed');
+    return {};
+  });
+
 const setReadyFlag = async (transactionId, ready) => {
   await db.query(
     `insert into order_flags (transaction_id, ready_for_pickup, updated_at)
@@ -87,10 +97,31 @@ const assertParticipant = (tx, userId, role) => {
   }
 };
 
+// Sharetribe puts the PaymentIntent's client secret here after transition/request-payment.
 const stripeClientSecret = tx =>
-  tx.attributes?.protectedData?.stripePaymentIntents?.default?.client_secret ||
-  tx.attributes?.protectedData?.stripePaymentIntentClientSecret ||
+  tx.attributes?.protectedData?.stripePaymentIntents?.default?.stripePaymentIntentClientSecret ||
   null;
+
+// Checkouts that were started but never paid, and questions asked before buying, aren't orders.
+const NOT_AN_ORDER = /transition\/(inquire|request-payment|request-payment-after-inquiry|expire-payment)$/;
+
+const getFlagsFor = async transactionIds => {
+  const flags = new Map();
+  if (transactionIds.length === 0) return flags;
+  try {
+    const { rows } = await db.query(
+      'select transaction_id, ready_for_pickup from order_flags where transaction_id = any($1)',
+      [transactionIds]
+    );
+    rows.forEach(row => {
+      flags.set(row.transaction_id, { readyForPickup: Boolean(row.ready_for_pickup) });
+    });
+  } catch (e) {
+    // Orders still load when Postgres is down; they only lose the ready-for-pickup notice.
+    log.error(e, 'cc-order-flags-failed');
+  }
+  return flags;
+};
 
 /**
  * GET /api/cc/orders?role=buyer|seller
@@ -104,11 +135,11 @@ exports.list = async (req, res) => {
     perPage: 100,
   });
   const included = response.data.included || [];
-  const orders = [];
-  for (const tx of response.data.data) {
-    const flags = await getFlags(tx.id.uuid);
-    orders.push(toCampusOrder(tx, included, flags));
-  }
+  const transactions = response.data.data.filter(
+    tx => !NOT_AN_ORDER.test(tx.attributes.lastTransition || '')
+  );
+  const flags = await getFlagsFor(transactions.map(tx => tx.id.uuid));
+  const orders = transactions.map(tx => toCampusOrder(tx, included, flags.get(tx.id.uuid)));
   orders.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
   res.json({ orders });
 };
@@ -121,7 +152,7 @@ exports.show = async (req, res) => {
   try {
     const { tx, included } = await loadTransaction(sdk, req.params.id);
     assertParticipant(tx, user.id.uuid, 'either');
-    const flags = await getFlags(tx.id.uuid);
+    const flags = await getFlagsOrNone(tx.id.uuid);
     res.json({ order: toCampusOrder(tx, included, flags) });
   } catch (e) {
     if (e.status && e.code) throw e;
@@ -159,20 +190,19 @@ exports.create = async (req, res) => {
   const orderData = { currency };
   const params = {
     listingId: new UUID(listingId),
-    stockReservationQuantity:
-      kind === 'service' ? undefined : Math.max(1, Math.floor(Number(quantity)) || 1),
-    cardToken: paymentMethodId,
+    // The card the buyer just typed into Stripe Elements, as a PaymentMethod id (pm_...).
+    paymentMethod: paymentMethodId,
   };
 
   if (kind === 'service') {
-    // date is YYYY-MM-DD, time is like "4:00 PM". Build a one-hour booking by default.
-    const start = parseLocalDateTime(date, time);
-    const durationMinutes = Number(listing.attributes.publicData?.durationMinutes) || 60;
-    const end = new Date(start.getTime() + durationMinutes * 60 * 1000);
-    params.bookingStart = start.toISOString();
-    params.bookingEnd = end.toISOString();
-    orderData.bookingDates = { bookingStart: params.bookingStart, bookingEnd: params.bookingEnd };
+    // date is YYYY-MM-DD and time is like "4:00 PM", both on the campus clock.
+    const start = parseBookingStart(date, time);
+    params.bookingStart = start;
+    params.bookingEnd = new Date(
+      start.getTime() + durationMinutes(listing.attributes.publicData) * 60 * 1000
+    );
   } else {
+    params.stockReservationQuantity = Math.max(1, Math.floor(Number(quantity)) || 1);
     orderData.stockReservationQuantity = params.stockReservationQuantity;
   }
 
@@ -370,7 +400,7 @@ exports.action = async (req, res) => {
       { id: tx.id, transition, params },
       TX_INCLUDE
     );
-    const flags = await getFlags(tx.id.uuid);
+    const flags = await getFlagsOrNone(tx.id.uuid);
     res.json({ order: toCampusOrder(response.data.data, response.data.included || [], flags) });
   } catch (e) {
     throw httpError(
@@ -469,7 +499,7 @@ exports.operatorAction = async (req, res) => {
   }
 
   const refreshed = await loadTransaction(sdk, req.params.id);
-  const flags = await getFlags(req.params.id);
+  const flags = await getFlagsOrNone(req.params.id);
   res.json({ order: toCampusOrder(refreshed.tx, refreshed.included, flags) });
 };
 
@@ -494,21 +524,18 @@ exports.lineItems = async (req, res) => {
   const orderData = { currency };
   if (kind === 'service') {
     if (!(date && time)) throw httpError(400, 'slot-required', 'Pick a time first.');
-    const start = parseLocalDateTime(date, time);
-    const end = new Date(start.getTime() + 60 * 60 * 1000);
-    orderData.bookingDates = {
-      bookingStart: start.toISOString(),
-      bookingEnd: end.toISOString(),
-    };
+    const start = parseBookingStart(date, time);
+    orderData.bookingStart = start;
+    orderData.bookingEnd = new Date(
+      start.getTime() + durationMinutes(listing.attributes.publicData) * 60 * 1000
+    );
   } else {
     orderData.stockReservationQuantity = Math.max(1, Math.floor(Number(quantity)) || 1);
   }
 
-  const lineItems = transactionLineItems(
-    listing,
-    orderData,
-    providerCommission,
-    customerCommission
+  // The helper adds each line's total, which Sharetribe otherwise only adds once the order exists.
+  const lineItems = constructValidLineItems(
+    transactionLineItems(listing, orderData, providerCommission, customerCommission)
   );
 
   const payin = lineItems
@@ -529,24 +556,13 @@ exports.lineItems = async (req, res) => {
   });
 };
 
-function parseLocalDateTime(date, time) {
-  // "4:00 PM" → 24h
-  const match = String(time)
-    .trim()
-    .match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
-  if (!match) {
-    throw httpError(400, 'bad-time', 'That time does not look right.');
-  }
-  let hour = Number(match[1]);
-  const minute = Number(match[2]);
-  const meridiem = match[3].toUpperCase();
-  if (meridiem === 'PM' && hour < 12) hour += 12;
-  if (meridiem === 'AM' && hour === 12) hour = 0;
-  const iso = `${date}T${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`;
-  // Interpret as America/Los_Angeles by appending offset roughly; for v1 use local Date parse.
-  const parsed = new Date(iso);
-  if (Number.isNaN(parsed.getTime())) {
+function parseBookingStart(date, time) {
+  const start = parseSlot(date, time);
+  if (!start) {
     throw httpError(400, 'bad-time', 'That date and time do not look right.');
   }
-  return parsed;
+  if (start.getTime() <= Date.now()) {
+    throw httpError(400, 'time-passed', 'That time has already passed. Pick another one.');
+  }
+  return start;
 }

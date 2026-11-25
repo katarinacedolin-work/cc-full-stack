@@ -2,6 +2,8 @@
  * Maps a Sharetribe transaction into the Campus Connect order shape.
  */
 
+const { toSlot } = require('../time');
+
 const BOOKING_PROCESS = 'default-booking';
 const PURCHASE_PROCESS = 'default-purchase';
 
@@ -142,9 +144,11 @@ exports.toCampusOrder = (tx, included = [], flags = {}) => {
     },
   };
 
-  if (booking?.attributes) {
-    order.date = booking.attributes.displayStart || booking.attributes.start;
-    order.time = null;
+  if (booking?.attributes?.start) {
+    // The pages show a slot as a campus date and clock, the way the booking picker does.
+    const slot = toSlot(booking.attributes.start);
+    order.date = slot.date;
+    order.time = slot.time;
     order.bookingStart = booking.attributes.start;
     order.bookingEnd = booking.attributes.end;
   }
