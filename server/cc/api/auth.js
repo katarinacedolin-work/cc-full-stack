@@ -81,6 +81,36 @@ exports.getSession = async (req, res) => {
 };
 
 /**
+ * PATCH /api/cc/account
+ * Body: { displayName }
+ * The name other students see next to listings, orders and messages.
+ */
+exports.updateAccount = async (req, res) => {
+  const displayName = String(req.body?.displayName || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!displayName) throw httpError(400, 'name-required', 'Add a display name.');
+  if (displayName.length > 48) {
+    throw httpError(400, 'name-too-long', 'Keep your display name under 48 characters.');
+  }
+  const sdk = getSdk(req, res);
+  try {
+    await sdk.currentUser.updateProfile({ displayName });
+  } catch (e) {
+    if (e.status === 401 || e.status === 403) {
+      throw httpError(401, 'sign-in-required', 'Sign in to continue.');
+    }
+    throw httpError(
+      e.status || 400,
+      'account-update-failed',
+      sharetribeMessage(e, 'Could not save your name.')
+    );
+  }
+  const user = await loadCurrentUser(req, res);
+  res.json({ session: toSession(user) });
+};
+
+/**
  * POST /api/cc/signup
  * Body: { email, password, firstName, lastName, acceptTerms: true }
  */

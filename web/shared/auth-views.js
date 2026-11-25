@@ -2,6 +2,9 @@
  * Sign-in and sign-up screens. Registered into VIEWS / ACTIONS / FORMS like the rest of the app.
  */
 
+/** The screens someone sees before they are signed in. They are the same on the buyer pages and in Seller Hub. */
+const AUTH_VIEW_NAMES = ["sign-in", "sign-up", "forgot-password", "check-inbox", "pending-approval", "auth-google-confirm"];
+
 function authShell(title, body, { links = "" } = {}) {
   return `<section class="auth-body"><div class="auth-card">
     <div class="eyebrow">Campus Connect · SDSU</div>

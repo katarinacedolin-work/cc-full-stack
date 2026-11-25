@@ -16,6 +16,8 @@ const orders = require('./orders');
 const config = require('./config');
 const payouts = require('./payouts');
 const tickets = require('./tickets');
+const conversations = require('./conversations');
+const notifications = require('./notifications');
 
 const router = express.Router();
 
@@ -32,6 +34,7 @@ router.post('/password-reset/confirm', asyncHandler(auth.confirmPasswordReset));
 router.post('/verify-email', asyncHandler(auth.verifyEmail));
 router.post('/resend-verification', asyncHandler(auth.resendVerification));
 router.post('/signup-with-google', asyncHandler(auth.signupWithGoogle));
+router.patch('/account', asyncHandler(auth.updateAccount));
 
 // ================ Listings and stores ================ //
 
@@ -72,6 +75,21 @@ router.post('/tickets/scan', asyncHandler(tickets.scan));
 router.get('/tickets/door', asyncHandler(tickets.door));
 router.post('/tickets/door-helpers', asyncHandler(tickets.addHelper));
 router.delete('/tickets/door-helpers/:listingId/:userId', asyncHandler(tickets.removeHelper));
+
+// ================ Messages and notifications ================ //
+
+router.get('/conversations', asyncHandler(conversations.list));
+router.post('/conversations', asyncHandler(conversations.open));
+router.post('/conversations/:id/messages', asyncHandler(conversations.send));
+router.post('/conversations/:id/read', asyncHandler(conversations.markRead));
+router.post('/conversations/:id/done', asyncHandler(conversations.setDone));
+
+router.get('/notifications', asyncHandler(notifications.list));
+router.post('/notifications/read-all', asyncHandler(notifications.markAllRead));
+router.post('/notifications/:id/read', asyncHandler(notifications.markRead));
+router.get('/settings', asyncHandler(notifications.getSettings));
+router.patch('/settings', asyncHandler(notifications.updateSettings));
+router.get('/changes', asyncHandler(notifications.changes));
 
 // ================ Fallbacks ================ //
 

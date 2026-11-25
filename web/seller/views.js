@@ -669,7 +669,7 @@ function sellerInboxView() {
           <div class="button-row"><button class="ghost-button compact ${active.done ? "is-done" : ""}" data-action="seller-toggle-done" data-id="${active.id}">${icon("check")} ${active.done ? "Done" : "Mark as done"}</button><button class="icon-button" data-action="open-report" aria-label="Report conversation">${icon("shield")}</button></div></div>
         <div class="chat-messages">${messageBubbles(active.messages, `This is the start of your conversation with ${active.name}.`)}</div>
         <div class="quick-reply-chips" aria-label="Saved replies">${SELLER_QUICK_REPLIES.map((reply) => `<button type="button" class="quick-reply" data-action="seller-quick-reply" data-text="${escapeHtml(reply)}">${escapeHtml(reply)}</button>`).join("")}</div>
-        <form class="chat-composer" data-form="send-message"><textarea name="message" placeholder="Reply to ${escapeHtml(firstName(active.name))}…" aria-label="Write a reply" rows="1"></textarea><button class="primary-button" type="submit" aria-label="Send message">${icon("arrow")}</button></form>
+        <form class="chat-composer" data-form="send-message" data-id="${active.id}"><textarea name="message" placeholder="Reply to ${escapeHtml(firstName(active.name))}…" aria-label="Write a reply" rows="1" maxlength="2000" required></textarea><button class="primary-button" type="submit" aria-label="Send message">${icon("arrow")}</button></form>
       </section>
     </div>`;
 }
@@ -680,9 +680,7 @@ const NOTIFICATION_FILTERS = [
   { id: "all", label: "All" },
   { id: "orders", label: "Orders" },
   { id: "messages", label: "Messages" },
-  { id: "reviews", label: "Reviews" },
-  { id: "store", label: "Store" },
-  { id: "payouts", label: "Payouts" }
+  { id: "reviews", label: "Reviews" }
 ];
 
 function sellerNotificationsView() {
@@ -760,12 +758,10 @@ function sellerProfileSection() {
   const section = state.seller.profileSection;
   if (section === "verification") return sellerProfileVerification();
   if (section === "availability") return sellerAvailabilitySettings();
-  if (section === "notifications") return `<div class="settings-group"><h2>What should reach you</h2><p class="muted small">These stay in the app for this prototype. Nothing is emailed.</p>
-    ${sellerSettingsRow("notifyRequests", "New orders and requests", "Bookings, purchases and cancellations.")}
-    ${sellerSettingsRow("notifyMessages", "Buyer messages", "When a buyer asks a question or replies.")}
-    ${sellerSettingsRow("notifyReviews", "Reviews", "When a buyer leaves a review you can reply to.")}
-    ${sellerSettingsRow("notifyPayouts", "Payouts", "When money is sent to your account.")}
-    ${sellerSettingsRow("notifyDigest", "Weekly summary", "A Monday recap of views, orders and earnings.")}</div>`;
+  if (section === "notifications") return `<div class="settings-group"><h2>What should reach you</h2><p class="muted small">These switches are for the bell at the top of the page. Campus Connect always emails you about your orders, and about messages on a listing or an order, so you never miss a buyer.</p>
+    ${sellerSettingsRow("notifyRequests", "New orders and requests", "Bookings, purchases, pickups and cancellations.")}
+    ${sellerSettingsRow("notifyMessages", "Messages", "When a buyer asks a question or replies.")}
+    ${sellerSettingsRow("notifyReviews", "Reviews", "When a buyer leaves a review.")}</div>`;
   if (section === "account") return `<div class="settings-group"><h2>Account</h2><p class="muted small">You're signed in to the Seller Hub demo as ${escapeHtml(seller.name)}.</p>
     <div class="settings-row"><div class="settings-row-copy"><strong>Switch to buying</strong><p class="muted small">Browse Campus Connect as Katarina, the buyer demo account.</p></div><button class="ghost-button" data-action="switch-mode">${icon("repeat")} Switch</button></div>
     <div class="settings-safety"><h3>Support and safety</h3><div class="button-row"><button type="button" class="ghost-button" data-action="open-help">${icon("help")} Get help</button><button type="button" class="ghost-button" data-action="open-report">${icon("shield")} Report a buyer</button></div></div>
@@ -957,8 +953,9 @@ function sellerPayoutsView() {
 
 /* ---------- Views ---------- */
 
-/* A buyer view opened from the Seller Hub is a preview: the same page under a banner that leads back. */
+/* A buyer view opened from the Seller Hub is a preview: the same page under a banner that leads back. Signing in is not a preview. */
 Object.entries(VIEWS).forEach(([name, view]) => {
+  if (AUTH_VIEW_NAMES.includes(name)) return;
   VIEWS[name] = () => `${sellerPreviewBanner()}${view()}`;
 });
 

@@ -13,8 +13,20 @@ const { toSlot, toDayLabel, campusDateKey } = require('../time');
 const { normalizeCode } = require('../tickets/code');
 const { completeOrder } = require('../tickets/complete');
 const store = require('../tickets/store');
+const notifications = require('../notifications/store');
+const { displayNameOf } = require('../people');
 
 const { UUID } = types;
+
+// A notification is extra. Scanning and adding helpers work without it.
+const notifyQuietly = async (notification, alsoReload = []) => {
+  try {
+    await notifications.write(notification);
+    await notifications.touch([notification.userId, ...alsoReload]);
+  } catch (e) {
+    log.error(e, 'cc-ticket-notification-failed', { dedupeKey: notification.dedupeKey });
+  }
+};
 
 // A busy door scans a ticket every second or two. This only stops someone guessing codes.
 const scanLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 120 });
@@ -77,6 +89,20 @@ exports.scan = async (req, res) => {
         })
       );
     }
+    // The buyer sees their ticket was used. If it wasn't them at the door, they know at once.
+    notifyQuietly({
+      userId: ticket.buyer_id,
+      side: 'buyer',
+      category: 'orders',
+      setting: 'notifyOrders',
+      title: 'Ticket scanned',
+      body: [ticket.listing_title, 'Enjoy the event.'].filter(Boolean).join(' · '),
+      emoji: '🎟️',
+      accent: 'coral',
+      action: 'order',
+      targetId: ticket.transaction_id,
+      dedupeKey: `tx:${ticket.transaction_id}:scanned:buyer`,
+    });
     res.json({
       ok: true,
       title: 'Marked used',
@@ -225,6 +251,21 @@ exports.addHelper = async (req, res) => {
       `An event can have up to ${store.MAX_HELPERS} door helpers.`
     );
   }
+  await notifyQuietly({
+    userId: helper.id.uuid,
+    side: 'seller',
+    category: 'orders',
+    setting: 'notifyRequests',
+    title: 'You can scan tickets',
+    body: `${displayNameOf(user)} added you as a door helper for ${listing.attributes.title ||
+      'an event'}. Open Seller Hub at the door to scan.`,
+    emoji: '🎟️',
+    accent: 'coral',
+    action: 'scan',
+    targetId: listingId,
+    dedupeKey: `helper:${listingId}:${helper.id.uuid}`,
+    replace: true,
+  });
   res.status(201).json({ ok: true });
 };
 

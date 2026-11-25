@@ -240,9 +240,66 @@ const api = (() => {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      fail(payload?.error?.message || "Something went wrong. Please try again.");
+      const error = new Error(payload?.error?.message || "Something went wrong. Please try again.");
+      error.status = response.status;
+      throw error;
     }
     return payload;
+  }
+
+  /* Which half of the site this page is. Each has its own inbox and its own bell. */
+  const side = asSeller ? "seller" : "buyer";
+  const threadPath = (id, rest = "") => `/conversations/${encodeURIComponent(id)}${rest}`;
+
+  /* The last session the server returned, for the name and email on the account page. */
+  let lastSession = null;
+
+  const NOTIFY_KEYS = ["notifyMessages", "notifyOrders", "notifyRequests", "notifyReviews"];
+
+  /** Which kinds of notification reach the bell. Everything is on when the server can't be asked. */
+  async function getNotifySettings() {
+    try {
+      const { settings } = await ccFetch("/settings");
+      return settings;
+    } catch {
+      return {};
+    }
+  }
+
+  /** Saves the notification switches among `changes`, and answers whether there were any. */
+  async function saveNotifySettings(changes) {
+    const switches = pick(changes, NOTIFY_KEYS);
+    if (!Object.keys(switches).length) return false;
+    await ccFetch("/settings", { method: "PATCH", body: switches });
+    return true;
+  }
+
+  /* ---------- Changes that arrive on their own ---------- */
+
+  const CHANGES_EVERY_MS = 20000;
+  let changes = { user: "", key: "", at: null, known: false };
+  let changesTimer = null;
+
+  /** Asks whether a message, notification or order changed since the last time, and tells the listeners if so. */
+  async function checkForChanges() {
+    if (document.visibilityState !== "visible") return;
+    try {
+      const query = changes.key ? `?user=${encodeURIComponent(changes.user)}&key=${encodeURIComponent(changes.key)}` : "";
+      const next = await ccFetch(`/changes${query}`);
+      const changed = changes.known && next.at !== changes.at;
+      changes = { ...next, known: true };
+      if (changed) emit({ type: "changed" });
+    } catch (error) {
+      /* Signed out: there is nothing to watch until the page loads again. Anything else is tried again next round. */
+      if (error.status === 401) window.clearInterval(changesTimer);
+    }
+  }
+
+  function watchForChanges() {
+    if (changesTimer) return;
+    changesTimer = window.setInterval(checkForChanges, CHANGES_EVERY_MS);
+    document.addEventListener("visibilitychange", checkForChanges);
+    checkForChanges();
   }
 
   const endpoints = {
@@ -250,6 +307,7 @@ const api = (() => {
 
     getSession: async () => {
       const { session } = await ccFetch("/session");
+      lastSession = session || null;
       return session || { userId: "" };
     },
     signOut: async () => {
@@ -425,14 +483,25 @@ const api = (() => {
 
     /* Account */
 
-    getAccount: () => db.buyer.account,
+    /** The name and email come from the session, and the notification switches from the server. The privacy switches are still mock. */
+    getAccount: async () => {
+      if (!lastSession) await endpoints.getSession();
+      return {
+        ...db.buyer.account,
+        ...(lastSession ? { displayName: lastSession.displayName, email: lastSession.email } : {}),
+        ...(await getNotifySettings())
+      };
+    },
 
-    updateAccount: (changes) => {
-      const fields = pick(changes, ["displayName", "notifyMessages", "notifyOrders", "notifyHousing", "profileVisible", "showCampus"]);
-      if ("displayName" in fields && !String(fields.displayName).trim()) fail("Add a display name.");
-      Object.assign(db.buyer.account, fields);
-      if ("displayName" in fields) renameSeller(db.buyer.id, fields.displayName);
-      return db.buyer.account;
+    updateAccount: async (changes) => {
+      if ("displayName" in changes) {
+        if (!String(changes.displayName).trim()) fail("Add a display name.");
+        const { session } = await ccFetch("/account", { method: "PATCH", body: { displayName: changes.displayName } });
+        lastSession = session;
+      }
+      await saveNotifySettings(changes);
+      Object.assign(db.buyer.account, pick(changes, ["profileVisible", "showCampus"]));
+      return endpoints.getAccount();
     },
 
     getPaymentMethods: () => db.buyer.paymentMethods,
@@ -525,47 +594,56 @@ const api = (() => {
 
     /* Messages and notifications, for whoever is signed in */
 
-    getConversations: () => me().conversations,
-
-    /** Finds or starts the buyer's thread about a seller ({ sellerId, listingId }), an agent, a job or a housing post. */
-    openConversation: ({ sellerId, listingId, agentId, jobId, housingId }) => {
-      const threads = db.buyer.conversations;
-      const greet = (text) => [{ from: "them", text, at: now() }];
-      if (agentId) {
-        const agent = find(db.agents, agentId, "agent");
-        return threads.find((thread) => thread.id === `agent-${agentId}`)
-          || startConversation(db.buyer, { id: `agent-${agentId}`, name: agent.name, initials: agent.initials, accent: agent.accent, context: agent.brokerage, messages: greet(`Hey — I can help with places around ${agent.focus}. What are you looking for?`) });
+    /**
+     * This page's inbox, newest first. Each conversation is
+     * { id, kind, name, initials, accent, personId, context, unread, done, messages: [{ from: "me" | "them", text, at }] },
+     * plus sellerId, listingId and orderId where there is one.
+     * The inbox is empty, rather than the page failing, when it can't be loaded.
+     */
+    getConversations: async () => {
+      try {
+        const { conversations } = await ccFetch(`/conversations?side=${side}`);
+        return conversations;
+      } catch (error) {
+        console.error(error);
+        return [];
       }
-      if (jobId || housingId) {
-        const post = jobId ? find(db.jobs, jobId, "job") : find(db.housing, housingId, "place");
-        const greeting = jobId ? `Hey — happy to answer questions about the ${post.title} role.` : `Hey — happy to answer questions about ${post.title}.`;
-        return threads.find((thread) => thread.id === `board-${post.id}`)
-          || startConversation(db.buyer, { id: `board-${post.id}`, name: post.poster, initials: post.initials, accent: post.accent, context: post.title, messages: greet(greeting) });
-      }
-      const seller = find(db.sellers, sellerId, "seller");
-      const context = db.listings.find((listing) => listing.id === listingId)?.title || db.stores.find((store) => store.sellerId === sellerId)?.name || "Campus Connect";
-      return threads.find((thread) => thread.sellerId === sellerId)
-        || startConversation(db.buyer, { id: `seller-${sellerId}`, sellerId, name: seller.name, initials: seller.initials, accent: seller.accent, context });
     },
 
-    sendMessage: (conversationId, text) => {
-      const conversation = find(me().conversations, conversationId, "conversation");
-      if (!text) fail("Write a message first.");
-      const at = now();
-      conversation.messages.push({ from: "me", text, at });
-      const mirror = mirrorOf(conversation);
-      if (mirror) {
-        mirror.messages.push({ from: "them", text, at });
-        mirror.unread = true;
-      }
+    /**
+     * Finds or starts the conversation about an order ({ orderId }), about a listing ({ listingId }) or with a
+     * seller ({ sellerId }). The other person hears nothing until the first message is sent.
+     */
+    openConversation: async ({ orderId, listingId, sellerId, agentId, jobId, housingId }) => {
+      if (agentId || jobId || housingId) fail("Messages about board posts open when the boards go live.");
+      const about = orderId ? { orderId } : listingId ? { listingId } : { sellerId };
+      const { conversation } = await ccFetch("/conversations", { method: "POST", body: about });
       return conversation;
     },
 
-    markConversationRead: (id) => { find(me().conversations, id, "conversation").unread = false; },
+    sendMessage: async (conversationId, text) => {
+      if (!text) fail("Write a message first.");
+      const { conversation } = await ccFetch(threadPath(conversationId, "/messages"), { method: "POST", body: { text } });
+      return conversation;
+    },
 
-    getNotifications: () => me().notifications,
-    markNotificationRead: (id) => { find(me().notifications, id, "notification").unread = false; },
-    markAllNotificationsRead: () => me().notifications.forEach((notification) => { notification.unread = false; }),
+    markConversationRead: async (id) => { await ccFetch(threadPath(id, "/read"), { method: "POST", body: {} }); },
+
+    /**
+     * This page's bell, newest first. Each is { id, unread, category, title, body, at, emoji, accent, action },
+     * plus orderId, conversationId or listingId for where a click leads.
+     */
+    getNotifications: async () => {
+      try {
+        const { notifications } = await ccFetch(`/notifications?side=${side}`);
+        return notifications;
+      } catch (error) {
+        console.error(error);
+        return [];
+      }
+    },
+    markNotificationRead: async (id) => { await ccFetch(`/notifications/${encodeURIComponent(id)}/read`, { method: "POST", body: {} }); },
+    markAllNotificationsRead: async () => { await ccFetch(`/notifications/read-all?side=${side}`, { method: "POST", body: {} }); },
 
     /* Support */
 
@@ -657,17 +735,10 @@ const api = (() => {
 
     /* Selling: messages */
 
-    setConversationDone: (id, done) => { find(db.seller.conversations, id, "conversation").done = Boolean(done); },
+    setConversationDone: async (id, done) => { await ccFetch(threadPath(id, "/done"), { method: "POST", body: { done: Boolean(done) } }); },
 
     /** Finds or starts the seller's thread with the buyer of an order. */
-    openOrderConversation: (orderId) => {
-      const order = find(db.seller.orders, orderId, "order");
-      const conversation = db.seller.conversations.find((entry) => entry.id === order.conversationId)
-        || startConversation(db.seller, { id: newId("sc"), name: order.buyer, initials: order.initials, accent: order.accent, orderId: order.id, context: listingOf(order)?.title || "Order" });
-      order.conversationId = conversation.id;
-      conversation.unread = false;
-      return conversation;
-    },
+    openOrderConversation: (orderId) => endpoints.openConversation({ orderId }),
 
     /* Selling: performance */
 
@@ -686,13 +757,15 @@ const api = (() => {
 
     /* Selling: settings, hours and calendar */
 
-    getSellerSettings: () => db.seller.settings,
+    /** The notification switches come from the server. The rest is still mock. */
+    getSellerSettings: async () => ({ ...db.seller.settings, ...(await getNotifySettings()) }),
 
     /** Turning `awayMode` on pauses every active listing. Turning it off brings those same listings back. */
     updateSellerSettings: async (changes) => {
       const settings = db.seller.settings;
       const wasAway = settings.awayMode;
-      Object.assign(settings, pick(changes, Object.keys(settings)));
+      await saveNotifySettings(changes);
+      Object.assign(settings, pick(changes, Object.keys(settings).filter((key) => !NOTIFY_KEYS.includes(key))));
       if ("awayMode" in changes && settings.awayMode !== wasAway) {
         try {
           await ccFetch("/listings/away", { method: "POST", body: { away: settings.awayMode } });
@@ -707,7 +780,7 @@ const api = (() => {
           });
         }
       }
-      return settings;
+      return endpoints.getSellerSettings();
     },
 
     /** { timezone, days: { sun: [{ start, end }], … } } with times as minutes after midnight. */
@@ -781,10 +854,16 @@ const api = (() => {
     ...remote,
 
     /**
-     * Calls `listener(event)` when something changes without the user doing it. A real service would push these.
-     * Events: { type: "chore-paid", choreId, orderId, poster }.
+     * Calls `listener(event)` when something changes without the user doing it.
+     * Events:
+     *   { type: "changed" }  a message, a notification or an order of the signed-in student changed. The page
+     *                        asks the server every few seconds while it is in front, and reloads what it shows.
+     *   { type: "chore-paid", choreId, orderId, poster }  mock only.
      */
-    subscribe: (listener) => { listeners.add(listener); },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      watchForChanges();
+    },
 
     /** Mock only. Carries the demo data to the other page, so switching between buying and selling keeps what you did. */
     keepDemoData: () => sessionStorage.setItem(HANDOFF_KEY, JSON.stringify(db))

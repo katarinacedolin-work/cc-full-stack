@@ -664,12 +664,16 @@ Object.assign(FORMS, {
 /* ---------- Notifications ---------- */
 
 Object.assign(NOTIFICATION_TARGETS, {
-  order: (notification) => {
-    if (!notification?.orderId || !getSellerOrder(notification.orderId)) return;
+  /* What the notification is about may be newer than what the page last loaded. */
+  order: async (notification) => {
+    if (!notification?.orderId) return;
+    await load("sellerOrders");
+    if (!getSellerOrder(notification.orderId)) return setView("seller-orders");
     openSellerOrder(notification.orderId);
   },
-  inbox: (notification) => {
+  inbox: async (notification) => {
     if (!notification?.conversationId) return;
+    await load("conversations");
     setView("seller-inbox", { selectedConversationId: notification.conversationId });
   },
   listing: (notification) => {
@@ -677,15 +681,28 @@ Object.assign(NOTIFICATION_TARGETS, {
     openListingEditor(notification.listingId);
   },
   reviews: () => setView("seller-reviews"),
-  payouts: () => setView("seller-payouts"),
-  store: () => setView("seller-stores")
+  /* A host added you as a door helper for one of their events. */
+  scan: async () => {
+    await load("door");
+    setView("seller-scan");
+  }
 });
+
+/** The Seller Hub views that redraw when a message, a notification or an order changes on its own. */
+const SELLER_LIVE_VIEWS = ["seller-dashboard", "seller-inbox", "seller-notifications"];
 
 /* ---------- Seller-only UI wiring ---------- */
 
 if (IS_SELLER) {
   let loadingHoursPreview = false;
   let lastView = null;
+
+  /* A new order, a message from a buyer, or a notification. */
+  api.subscribe((event) => run(async () => {
+    if (event.type !== "changed") return;
+    await load("conversations", "notifications", "sellerOrders");
+    showChanges(SELLER_LIVE_VIEWS);
+  }));
 
   document.addEventListener("app:render", () => {
     if (state.view !== "seller-scan" && lastView === "seller-scan") stopTicketScan();
@@ -695,7 +712,8 @@ if (IS_SELLER) {
       const open = state.view === "seller-inbox" && selectedConversation();
       if (open?.unread) {
         await api.markConversationRead(open.id);
-        await refresh("conversations");
+        /* Reading a conversation also clears its notification. */
+        await refresh("conversations", "notifications");
       }
     });
 
