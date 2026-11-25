@@ -43,9 +43,10 @@ const sellerSettingsRow = (key, title, body) => settingsRow(data.sellerSettings[
 
 function orderStatusLabel(order) {
   if (order.status === "requested") return order.kind === "service" ? "Booking request" : "New order";
-  if (order.status === "confirmed") return order.kind === "service" ? "Upcoming" : "Accepted";
+  if (order.status === "confirmed") return order.kind === "service" ? "Upcoming" : "Paid";
   if (order.status === "ready") return "Ready for pickup";
   if (order.status === "completed") return "Completed";
+  if (order.status === "disputed") return "Problem reported";
   return "Cancelled";
 }
 
@@ -391,24 +392,40 @@ function sellerOrdersView() {
 
 function orderTimeline(order) {
   if (order.status === "cancelled") return `<div class="order-cancelled">${icon("close")} <div><strong>Cancelled</strong><span class="muted small">${escapeHtml(order.cancelReason || "This order was cancelled.")}</span></div></div>`;
-  const steps = order.kind === "ticket" ? ["Sold", "Valid", "Used at the door"] : order.kind === "service" ? ["Requested", "Confirmed", "Completed"] : ["Ordered", "Accepted", "Ready for pickup", "Picked up"];
+  const steps = order.kind === "ticket" ? ["Sold", "Valid", "Used at the door"] : order.kind === "service" ? ["Requested", "Confirmed", "Completed"] : ["Paid", "Ready for pickup", "Picked up"];
   const progress = order.kind === "ticket"
     ? { confirmed: 1, completed: 2 }[order.status]
     : order.kind === "service"
     ? { requested: 0, confirmed: 1, completed: 2 }[order.status]
-    : { requested: 0, confirmed: 1, ready: 2, completed: 3 }[order.status];
+    : { confirmed: 0, ready: 1, completed: 2 }[order.status];
   return `<ol class="order-timeline">${steps.map((step, index) => `<li class="${index < progress || order.status === "completed" ? "done" : index === progress ? "current" : ""}"><span class="timeline-dot">${index < progress || order.status === "completed" ? icon("check", 12) : ""}</span><span>${step}</span></li>`).join("")}</ol>`;
 }
 
 function orderActions(order) {
   const id = order.id;
-  if (order.kind === "ticket" && order.status !== "completed") return `<button class="primary-button" data-view="seller-scan">${icon("ticket")} Scan at the door</button>`;
+  if (order.kind === "ticket" && order.status !== "completed") {
+    return `<button class="primary-button" data-view="seller-scan">${icon("ticket")} Scan at the door</button>`;
+  }
   if (order.kind === "ticket") return `<p class="muted small">Scanned. This ticket cannot be used again.</p>`;
-  if (order.status === "requested") return `<button class="primary-button" data-action="seller-order-accept" data-id="${id}">${icon("check")} Accept ${order.kind === "service" ? "booking" : "order"}</button><button class="ghost-button" data-action="seller-order-decline" data-id="${id}">Decline</button>`;
-  if (order.status === "confirmed" && order.kind === "service") return `<button class="primary-button" data-action="seller-order-complete" data-id="${id}">${icon("check")} Mark session completed</button><button class="ghost-button" data-action="seller-order-reschedule" data-id="${id}">${icon("calendar")} Reschedule</button><button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>`;
-  if (order.status === "confirmed") return `<button class="primary-button" data-action="seller-order-ready" data-id="${id}">${icon("package")} Mark ready for pickup</button><button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>`;
-  if (order.status === "ready") return `<button class="primary-button" data-action="seller-order-complete" data-id="${id}">${icon("check")} Mark picked up</button><button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>`;
-  if (order.status === "completed") return order.reviewRequested ? `<p class="muted small">${icon("check", 14)} Review requested.</p>` : `<button class="ghost-button" data-action="seller-order-thanks" data-id="${id}">${icon("star")} Ask for a review</button>`;
+  // Products have no accept step after payment — only services wait on the seller.
+  if (order.status === "requested" && order.kind === "service") {
+    return `<button class="primary-button" data-action="seller-order-accept" data-id="${id}">${icon("check")} Accept booking</button><button class="ghost-button" data-action="seller-order-decline" data-id="${id}">Decline</button>`;
+  }
+  if (order.status === "confirmed" && order.kind === "service") {
+    return `<button class="primary-button" data-action="seller-order-complete" data-id="${id}">${icon("check")} Mark session completed</button><button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>`;
+  }
+  if (order.status === "confirmed") {
+    return `<button class="primary-button" data-action="seller-order-ready" data-id="${id}">${icon("package")} Mark ready for pickup</button><button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>`;
+  }
+  if (order.status === "ready") {
+    return `<p class="muted small">Waiting for the buyer to confirm pickup. They can tap Got it, or report a problem.</p><button class="danger-button" data-action="seller-order-cancel" data-id="${id}">Cancel & refund</button>`;
+  }
+  if (order.status === "completed") {
+    return `<p class="muted small">${icon("check", 14)} Complete. Payout is on its way to Stripe.</p>`;
+  }
+  if (order.status === "disputed") {
+    return `<p class="muted small">Buyer reported a problem. Support will follow up.</p>`;
+  }
   return "";
 }
 
@@ -436,9 +453,9 @@ function sellerOrderView() {
       <aside class="summary-card order-side">
         <div class="eyebrow">Earnings</div>
         <div class="summary-line"><span>${order.kind === "service" ? "Service" : `${money(unitPrice)} × ${order.qty}`}</span><strong>${money(order.amount)}</strong></div>
-        <div class="summary-line"><span>Platform fee</span><strong>$0.00</strong></div>
-        <div class="summary-line total"><span>Your payout</span><strong>${order.status === "cancelled" ? "$0.00" : money(order.amount)}</strong></div>
-        <p class="checkout-disclaimer">${payoutLine}. Payments stay on Campus Connect, so never accept payment in chat.</p>
+        <div class="summary-line"><span>Platform fee</span><strong>−${money(order.platformFee || 0)}</strong></div>
+        <div class="summary-line total"><span>Your payout</span><strong>${order.status === "cancelled" ? "$0.00" : money(order.payout != null ? order.payout : Math.max(0, order.amount - (order.platformFee || 0)))}</strong></div>
+        <p class="checkout-disclaimer">${payoutLine}. Fee is 3.6% with a $0.30 minimum, taken from your payout. Never accept payment in chat.</p>
         <div class="seller-card buyer-card"><div class="seller-card-main">${buyerAvatar(order)}<div><div class="seller-name">${escapeHtml(order.buyer)}</div><div class="seller-sub">SDSU · Student verified</div></div></div><button class="text-button" data-action="seller-message-buyer" data-id="${order.id}">Message ${icon("arrow")}</button></div>
         <button class="ghost-button full-width" data-action="open-help" style="margin-top:12px">${icon("help")} Get help with this order</button>
       </aside>
@@ -883,27 +900,26 @@ function sellerReviewsView() {
 /* ---------- Payouts ---------- */
 
 function sellerPayoutsView() {
-  const thisMonth = data.payouts.history.filter((payout) => payout.at.slice(0, 7) === new Date().toISOString().slice(0, 7));
+  const payouts = data.payouts || {};
+  const history = payouts.history || [];
+  const thisMonth = history.filter((payout) => payout.at.slice(0, 7) === new Date().toISOString().slice(0, 7));
   const paidThisMonth = thisMonth.filter((payout) => payout.status === "Paid").reduce((sum, payout) => sum + payout.amount, 0);
-  return `${sellerHeader({ eyebrow: "Seller Hub", title: "Payouts", sub: "Money from completed orders lands in your balance. Campus Connect charges no seller fees in this demo.", back: { view: "seller-profile", label: "Back to profile" }, actions: `<button class="primary-button" data-action="seller-withdraw" ${data.payouts.available > 0 ? "" : "disabled"}>${icon("wallet")} Withdraw</button>` })}
+  const statusHint = payouts.onboardingComplete
+    ? "Stripe Connect is ready"
+    : payouts.stripeConnected
+      ? "Finish Stripe Connect setup to receive payouts"
+      : "Connect Stripe to receive payouts";
+  return `${sellerHeader({ eyebrow: "Seller Hub", title: "Payouts", sub: "Completed orders pay out to your Stripe account on a schedule. Campus Connect takes 3.6% with a $0.30 minimum from each payout.", back: { view: "seller-profile", label: "Back to profile" } })}
     <div class="kpi-grid">
-      ${kpiCard({ label: "Available now", value: dollars(data.payouts.available), hint: "Ready to withdraw", iconName: "wallet" })}
-      ${kpiCard({ label: "Pending", value: dollars(data.payouts.pending), hint: "From accepted, not yet completed orders", iconName: "clock" })}
+      ${kpiCard({ label: "Pending on Campus Connect", value: dollars(payouts.pending || 0), hint: "From open orders not yet completed", iconName: "clock" })}
       ${kpiCard({ label: `Paid out in ${new Date().toLocaleDateString("en-US", { month: "long" })}`, value: dollars(paidThisMonth), hint: plural(thisMonth.length, "payout"), iconName: "check" })}
-      ${kpiCard({ label: "Next automatic payout", value: "Mon", hint: data.payouts.schedule, iconName: "calendar" })}
+      ${kpiCard({ label: "Payout schedule", value: "Auto", hint: payouts.schedule || "After pickup, session, or event", iconName: "calendar" })}
+      ${kpiCard({ label: "Stripe status", value: payouts.onboardingComplete ? "Ready" : payouts.stripeConnected ? "Setup" : "Off", hint: statusHint, iconName: "wallet" })}
     </div>
     <div class="analytics-grid">
-      <section class="seller-card"><div class="seller-card-header"><div><h2>History</h2></div></div><div class="seller-table payouts-table"><div class="seller-table-head"><span>Date</span><span>Destination</span><span>Amount</span><span>Status</span></div>${data.payouts.history.map((payout) => `<div class="seller-row"><div class="cell" data-label="Date"><strong>${escapeHtml(longDate(payout.at))}</strong></div><div class="cell" data-label="To"><span class="muted small">${escapeHtml(data.payouts.method)}</span></div><div class="cell" data-label="Amount"><strong>${dollars(payout.amount)}</strong></div><div class="cell" data-label="Status">${statusPill(payout.status === "Paid" ? "completed" : "requested", payout.status)}</div></div>`).join("")}</div></section>
-      <section class="seller-card"><div class="seller-card-header"><div><h2>Payout method</h2></div></div><div class="payout-method"><span class="trust-icon">${icon("wallet")}</span><div><strong>${escapeHtml(data.payouts.method)}</strong><span class="muted small">${escapeHtml(data.payouts.schedule)} · usually arrives in 1–2 business days</span></div><button class="ghost-button compact" data-action="seller-change-method">Change</button></div><div class="trust-note" style="margin-top:14px">Keep every payment on Campus Connect. Buyers are protected and you're covered if something goes wrong.</div></section>
+      <section class="seller-card"><div class="seller-card-header"><div><h2>History</h2></div></div>${history.length ? `<div class="seller-table payouts-table"><div class="seller-table-head"><span>Date</span><span>Destination</span><span>Amount</span><span>Status</span></div>${history.map((payout) => `<div class="seller-row"><div class="cell" data-label="Date"><strong>${escapeHtml(longDate(payout.at))}</strong></div><div class="cell" data-label="To"><span class="muted small">${escapeHtml(payouts.method)}</span></div><div class="cell" data-label="Amount"><strong>${dollars(payout.amount)}</strong></div><div class="cell" data-label="Status">${statusPill(payout.status === "Paid" ? "completed" : "requested", payout.status)}</div></div>`).join("")}</div>` : `<div class="empty-state seller-empty"><div class="empty-shape">$</div><h3>No payouts yet.</h3><p class="muted">Completed orders show here after Stripe pays out.</p></div>`}</section>
+      <section class="seller-card"><div class="seller-card-header"><div><h2>Payout method</h2></div></div><div class="payout-method"><span class="trust-icon">${icon("wallet")}</span><div><strong>${escapeHtml(payouts.method || "Not connected")}</strong><span class="muted small">${escapeHtml(statusHint)}</span></div></div><div class="trust-note" style="margin-top:14px">There is no manual withdraw. Money goes to Stripe Connect after the buyer confirms pickup, a session ends, or a ticket is scanned. Keep every payment on Campus Connect.</div></section>
     </div>`;
-}
-
-function openWithdrawModal() {
-  renderModal(`<div class="eyebrow">Withdraw</div><h2>Send money to ${escapeHtml(data.payouts.method)}.</h2><p class="muted">${dollars(data.payouts.available)} is available. Demo only, so no money moves.</p><form data-form="seller-withdraw"><div class="field"><label for="withdraw-amount">Amount ($)</label><input id="withdraw-amount" name="amount" type="number" min="1" step="0.01" max="${data.payouts.available.toFixed(2)}" value="${data.payouts.available.toFixed(2)}" required /></div><div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Withdraw ${icon("arrow")}</button></div></form>`);
-}
-
-function openPayoutMethodModal() {
-  renderModal(`<div class="eyebrow">Payout method</div><h2>Where should payouts go?</h2><p class="muted">Payouts go to ${escapeHtml(data.payouts.method)} now. Demo only, so no bank is contacted.</p><form data-form="seller-payout-method"><div class="form-grid"><div class="field"><label for="payout-type">Account type</label><select id="payout-type" name="type"><option>Checking</option><option>Savings</option></select></div><div class="field"><label for="payout-last4">Last four digits</label><input id="payout-last4" name="last4" required inputmode="numeric" pattern="[0-9]{4}" maxlength="4" autocomplete="off" placeholder="4821" /></div></div><div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Save method ${icon("check")}</button></div></form>`);
 }
 
 /* ---------- Views ---------- */

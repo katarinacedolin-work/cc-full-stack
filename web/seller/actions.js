@@ -177,6 +177,9 @@ Object.assign(ACTIONS, {
   "message-store": previewReadOnly,
   "confirm-order": previewReadOnly,
   "start-checkout": previewReadOnly,
+  "got-it": previewReadOnly,
+  "report-order-problem": previewReadOnly,
+  "open-order-review": previewReadOnly,
 
   "seller-new-listing": () => {
     state.sellKind = null;
@@ -306,22 +309,19 @@ Object.assign(ACTIONS, {
   "seller-order-complete": async (target) => {
     const order = await api.updateOrderStatus(target.dataset.id, "completed");
     await refresh("sellerOrders", "notifications", "listings", "payouts");
-    showToast(`Completed. ${money(order.amount)} added to your balance.`);
+    const payout = order.payout != null ? order.payout : order.amount;
+    showToast(`Completed. ${money(payout)} is headed to Stripe.`);
   },
 
   "seller-order-decline": (target) => openOrderReasonModal(getSellerOrder(target.dataset.id), "decline"),
   "seller-order-cancel": (target) => openOrderReasonModal(getSellerOrder(target.dataset.id), "cancel"),
 
-  "seller-order-reschedule": async (target) => {
-    const order = getSellerOrder(target.dataset.id);
-    const { slots } = await api.getAvailability(order.listingId);
-    openRescheduleModal(order, slots);
+  "seller-order-reschedule": async () => {
+    throw new Error("Reschedule is not available. Message the buyer and cancel if you need a new time.");
   },
 
-  "seller-order-thanks": async (target) => {
-    await api.requestReview(target.dataset.id);
-    await refresh("sellerOrders", "notifications");
-    showToast("Review request sent to the buyer.");
+  "seller-order-thanks": async () => {
+    throw new Error("Campus Connect sends review reminders automatically.");
   },
 
   "seller-message-buyer": async (target) => {
@@ -403,8 +403,12 @@ Object.assign(ACTIONS, {
   },
 
   "seller-set-reviews-filter": sellerUpdate((target) => ({ reviewsFilter: target.dataset.filter })),
-  "seller-withdraw": () => openWithdrawModal(),
-  "seller-change-method": () => openPayoutMethodModal(),
+  "seller-withdraw": () => {
+    throw new Error("Payouts go to your Stripe account on a schedule. There is no manual withdraw.");
+  },
+  "seller-change-method": () => {
+    throw new Error("Connect or update payouts through Stripe Connect.");
+  },
 
   "seller-back-availability": () => {
     state.seller.profileSection = "availability";
@@ -592,11 +596,8 @@ Object.assign(FORMS, {
     await applyScan(fields.code);
   },
 
-  "seller-withdraw": async (fields) => {
-    await api.withdraw(fields.amount);
-    closeModal();
-    await refresh("payouts");
-    showToast(`${money(Number(fields.amount))} is on its way to ${data.payouts.method}.`);
+  "seller-withdraw": async () => {
+    throw new Error("Payouts go to your Stripe account on a schedule. There is no manual withdraw.");
   },
 
   "seller-announcement": async (fields) => {
@@ -615,11 +616,8 @@ Object.assign(FORMS, {
     showToast("Phone number saved for this demo.");
   },
 
-  "seller-payout-method": async (fields) => {
-    await api.updatePayoutMethod(fields);
-    closeModal();
-    await refresh("payouts");
-    showToast("Payout method updated.");
+  "seller-payout-method": async () => {
+    throw new Error("Connect or update payouts through Stripe Connect.");
   }
 });
 

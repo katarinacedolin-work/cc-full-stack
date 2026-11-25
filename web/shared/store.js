@@ -129,6 +129,8 @@ const state = {
   /* Buyer: booking and buying. `booking` holds the open times for the service on screen (see loadBooking in ui.js). */
   booking: null,
   quantity: 1,
+  checkoutEstimate: null,
+  config: null,
 
   /* Buyer: boards and settings. */
   jobFormOpen: false,

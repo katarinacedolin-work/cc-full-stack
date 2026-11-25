@@ -333,6 +333,16 @@
 .summary-line { display: flex; justify-content: space-between; gap: 14px; margin: 14px 0; color: var(--muted); font-size: 13px; }
 .summary-line.total { margin-top: 18px; padding-top: 15px; border-top: 1px solid var(--line); color: var(--ink); font-size: 16px; font-weight: 900; }
 .checkout-disclaimer { margin-top: 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.stripe-card-element {
+  margin-top: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  min-height: 44px;
+}
+#stripe-card-errors:empty { display: none; }
+#stripe-card-errors { color: #b91c1c; margin-top: 8px; }
 
 .seller-hero { display: flex; align-items: center; gap: 20px; padding: 22px 24px; border: 1px solid var(--line); border-radius: 22px; background: #fff; }
 .profile-hero { margin-top: 4px; }

@@ -382,18 +382,23 @@ function checkoutView(listing) {
   const service = listing.kind === "service";
   const ticket = listing.kind === "ticket";
   const quantity = service || ticket ? 1 : state.quantity;
-  const total = listing.price * quantity;
+  const estimate = state.checkoutEstimate;
+  const total = estimate?.payinTotal ?? listing.price * quantity;
   const steps = service
     ? `<div class="step"><span class="step-number">2</span><div><strong>${escapeHtml(slotLabel(state.booking))}</strong><p>${escapeHtml(listing.meeting)} · ${escapeHtml(listing.unit)}</p></div></div><div class="step"><span class="step-number">3</span><div><strong>Cancellation terms</strong><p>Free cancellation up to 24 hours before the appointment. Support is available from your order page.</p></div></div>`
     : ticket
       ? `<div class="step"><span class="step-number">2</span><div><strong>${escapeHtml(ticketSchedule(listing))}</strong><p>${escapeHtml(ticketHost(listing))}</p></div></div><div class="step"><span class="step-number">3</span><div><strong>Your QR code</strong><p>It shows up as soon as you pay. They scan it once at the door.</p></div></div>`
-      : `<div class="step"><span class="step-number">2</span><div><strong>${plural(quantity, "item")}</strong><p>${escapeHtml(listing.availability)} · ${escapeHtml(listing.meeting)}</p></div></div><div class="step"><span class="step-number">3</span><div><strong>Local handoff</strong><p>We will show the pickup details after the seller confirms the order.</p></div></div>`;
+      : `<div class="step"><span class="step-number">2</span><div><strong>${plural(quantity, "item")}</strong><p>${escapeHtml(listing.availability)} · ${escapeHtml(listing.meeting)}</p></div></div><div class="step"><span class="step-number">3</span><div><strong>Campus pickup</strong><p>The seller will mark the order ready, then you confirm you got it.</p></div></div>`;
   const priceLine = listing.price ? `${ticket ? ticketPriceLabel(listing.price) : money(listing.price)}${service ? ` / ${escapeHtml(listing.unit)}` : ticket ? "" : " each"}` : "Free";
-  return `<div class="page-top-row"><button class="back-button" data-action="back-from-checkout">${icon("chevron-left")} Back to listing</button><span class="small muted">Demo checkout · no payment is processed</span></div>
-    <div class="checkout-layout"><section class="checkout-panel"><div class="eyebrow">${ticket ? escapeHtml(ticketHost(listing)) : service ? "Book" : "Shop"}</div><h1>${ticket ? "Review your ticket." : service ? "Review your booking." : "Review your order."}</h1><p class="lede">${ticket ? "One purchase, one QR code. Bring it to the door." : service ? "Make sure the time, price and cancellation terms look right before you confirm." : "Make sure the seller, quantity and pickup details look right before you confirm."}</p>
-      <div class="step-list"><div class="step"><span class="step-number">1</span><div><strong>${escapeHtml(listing.title)}</strong><p>${escapeHtml(ticket ? ticketHost(listing) : listing.seller)} · ${priceLine}</p></div></div>${steps}</div>
-      <div class="button-row stretch"><button class="primary-button" data-action="confirm-order" data-id="${listing.id}">${listing.price ? `Confirm & pay ${money(total)}` : "Confirm · Free"} ${icon("arrow")}</button><button class="ghost-button" data-action="open-help">Questions about this order?</button></div>
-    </section><aside class="summary-card"><div class="summary-visual">${cardThumb(listing.title, listing.accent, listing.emoji)}<div><strong>${escapeHtml(listing.title)}</strong><div class="small muted">${escapeHtml(ticket ? ticketSchedule(listing) : listing.seller)}</div></div></div><div class="summary-line"><span>${ticket ? "Ticket" : service ? "Service" : `Item × ${quantity}`}</span><strong>${money(total)}</strong></div><div class="summary-line"><span>Platform fee</span><strong>$0.00</strong></div><div class="summary-line total"><span>Total</span><strong>${money(total)}</strong></div><p class="checkout-disclaimer">This is a prototype only. No real account, order or payment is created.</p></aside></div>`;
+  return `<div class="page-top-row"><button class="back-button" data-action="back-from-checkout">${icon("chevron-left")} Back to listing</button><span class="small muted">Secure checkout · Stripe</span></div>
+    <div class="checkout-layout"><section class="checkout-panel"><div class="eyebrow">${ticket ? escapeHtml(ticketHost(listing)) : service ? "Book" : "Shop"}</div><h1>${ticket ? "Review your ticket." : service ? "Review your booking." : "Review your order."}</h1><p class="lede">${ticket ? "One purchase, one QR code. Bring it to the door." : service ? "Make sure the time and price look right before you pay." : "Make sure the seller, quantity and pickup details look right before you pay."}</p>
+      <div class="step-list">
+        <div class="step"><span class="step-number">1</span><div><strong>${escapeHtml(listing.title)}</strong><p>${escapeHtml(ticket ? ticketHost(listing) : listing.seller)} · ${priceLine}</p></div></div>
+        ${steps}
+        <div class="step"><span class="step-number">4</span><div><strong>Card</strong><div id="stripe-card-element" class="stripe-card-element"></div><p class="muted small" id="stripe-card-errors" role="alert"></p></div></div>
+      </div>
+      <div class="button-row stretch"><button class="primary-button" data-action="confirm-order" data-id="${listing.id}">Pay ${money(total)} ${icon("arrow")}</button><button class="ghost-button" data-action="open-help">Questions about this order?</button></div>
+    </section><aside class="summary-card"><div class="summary-visual">${cardThumb(listing.title, listing.accent, listing.emoji)}<div><strong>${escapeHtml(listing.title)}</strong><div class="small muted">${escapeHtml(ticket ? ticketSchedule(listing) : listing.seller)}</div></div></div><div class="summary-line"><span>${ticket ? "Ticket" : service ? "Service" : `Item × ${quantity}`}</span><strong>${money(total)}</strong></div><div class="summary-line total"><span>Total</span><strong>${money(total)}</strong></div><p class="checkout-disclaimer">You pay the listed price. Campus Connect's fee comes out of the seller's payout.</p></aside></div>`;
 }
 
 function ticketPass(order, listing) {
@@ -411,8 +416,8 @@ function ticketPass(order, listing) {
 }
 
 const BUYER_ORDER_STATUS = {
-  service: { requested: "Awaiting confirmation", confirmed: "Upcoming", completed: "Completed", cancelled: "Cancelled" },
-  product: { requested: "Awaiting confirmation", confirmed: "Accepted", ready: "Ready for pickup", completed: "Picked up", cancelled: "Cancelled" },
+  service: { requested: "Awaiting confirmation", confirmed: "Upcoming", completed: "Completed", cancelled: "Cancelled", disputed: "Problem reported" },
+  product: { requested: "Awaiting confirmation", confirmed: "Paid", ready: "Ready for pickup", completed: "Picked up", cancelled: "Cancelled", disputed: "Problem reported" },
   ticket: { confirmed: "Valid", completed: "Used" },
   chore: { paid: "Paid on Campus Connect" }
 };
@@ -433,23 +438,76 @@ function orderView(order) {
   }
   const service = order.kind === "service";
   const cancelled = order.status === "cancelled";
+  const disputed = order.status === "disputed";
   const waiting = order.status === "requested";
-  const eyebrow = cancelled ? "Cancelled" : !service ? "Order placed" : waiting ? "Booking requested" : "Booking confirmed";
-  const heading = cancelled ? "This one was cancelled." : !service ? "That one is yours." : waiting ? "Your request is in." : "You are on the calendar.";
+  const ready = order.status === "ready";
+  const completed = order.status === "completed";
+  const eyebrow = cancelled
+    ? "Cancelled"
+    : disputed
+      ? "Problem reported"
+      : completed
+        ? "Completed"
+        : ready
+          ? "Ready for pickup"
+          : !service
+            ? "Order placed"
+            : waiting
+              ? "Booking requested"
+              : "Booking confirmed";
+  const heading = cancelled
+    ? "This one was cancelled."
+    : disputed
+      ? "Support has this one."
+      : completed
+        ? "All done."
+        : ready
+          ? "Ready when you are."
+          : !service
+            ? "That one is yours."
+            : waiting
+              ? "Your request is in."
+              : "You are on the calendar.";
   const lede = cancelled
     ? order.cancelReason || "The seller cancelled this order."
-    : waiting
-      ? "The seller has your request. You will get a notification when they answer."
-      : "It is saved in your activity, and updates show up in your notifications.";
+    : disputed
+      ? "Your report is linked to this order. Keep payments and messages on Campus Connect."
+      : completed
+        ? "Pickup is confirmed. You can leave a review for the seller."
+        : ready
+          ? "The seller marked this ready. Confirm when you have it, or report a problem."
+          : waiting
+            ? "The seller has your request. You will get a notification when they answer."
+            : "It is saved in your activity, and updates show up in your notifications.";
   const rows = [
     [service ? "Service" : "Product", listing?.title || "Campus Connect listing"],
-    service ? ["When", buyerOrderWhen(order)] : ["Quantity", order.quantity],
+    service ? ["When", buyerOrderWhen(order)] : ["Quantity", order.quantity || order.qty || 1],
     ["Status", buyerOrderStatus(order)],
     ["Total", money(order.total)],
-    ["Order reference", `CC-DEMO-${order.id.slice(-4).toUpperCase()}`]
+    ["Order reference", `CC-${order.id.slice(-4).toUpperCase()}`]
   ].map(([label, value]) => `<div class="order-detail-row"><span>${label}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
+
+  const can = order.can || {};
+  const actionButtons = [];
+  if (!service && can.markReceived && !cancelled && !disputed && !completed) {
+    actionButtons.push(`<button class="primary-button" data-action="got-it" data-id="${order.id}">${icon("check")} Got it</button>`);
+  }
+  if (!service && can.dispute && ready) {
+    actionButtons.push(`<button class="danger-button" data-action="report-order-problem" data-id="${order.id}">Report a problem</button>`);
+  }
+  if ((service || order.kind === "ticket") && completed) {
+    actionButtons.push(`<button class="ghost-button" data-action="report-order-problem" data-id="${order.id}">Report a problem</button>`);
+  }
+  if (can.review && completed) {
+    actionButtons.push(`<button class="ghost-button" data-action="open-order-review" data-id="${order.id}">${icon("star")} Leave a review</button>`);
+  }
+  actionButtons.push(`<button class="ghost-button" data-view="you">View activity</button>`);
+  if (!actionButtons.some((html) => html.includes('data-view="home"'))) {
+    actionButtons.push(`<button class="ghost-button" data-view="home">Keep exploring</button>`);
+  }
+
   return `<div class="page-top-row">${backToYou}${listing ? `<button class="ghost-button" data-action="message-seller" data-seller="${listing.sellerId}" data-listing="${listing.id}">${icon("chat")} Message seller</button>` : ""}</div>
-    <div class="order-success">${cancelled ? "" : `<div class="success-mark">${icon("check")}</div>`}<div class="eyebrow">${eyebrow}</div><h1>${heading}</h1><p class="lede">${escapeHtml(lede)}</p><div class="order-detail-card">${rows}</div><div class="button-row"><button class="primary-button" data-view="you">View activity</button><button class="ghost-button" data-view="home">Keep exploring</button></div></div>`;
+    <div class="order-success">${cancelled || disputed ? "" : `<div class="success-mark">${icon("check")}</div>`}<div class="eyebrow">${eyebrow}</div><h1>${heading}</h1><p class="lede">${escapeHtml(lede)}</p><div class="order-detail-card">${rows}</div><div class="button-row">${actionButtons.join("")}</div></div>`;
 }
 
 /* ---------- Sellers and stores ---------- */

@@ -462,32 +462,66 @@ const api = (() => {
 
     /* Buying */
 
-    getOrders: () => db.buyer.orders,
+    getConfig: async () => {
+      const payload = await ccFetch("/config");
+      return payload;
+    },
 
-    /** Books a service (`date` and `time` from getAvailability), or buys a product or ticket (`quantity`). */
-    placeOrder: ({ listingId, date, time, quantity }) => {
-      const listing = find(db.listings, listingId, "listing");
-      const { kind } = listing;
-      const count = kind === "product" ? Math.max(1, Math.floor(Number(quantity)) || 1) : 1;
-      if (listing.status && listing.status !== "active") fail("That listing is not available right now.");
-      if (kind === "service" && !(date && time)) fail("Pick a time first.");
-      if (kind !== "service" && listing.quantityAvailable < count) fail(listing.quantityAvailable ? `Only ${listing.quantityAvailable} left.` : kind === "ticket" ? "That ticket is sold out." : "That one just sold out.");
-
-      /* Only the demo seller answers requests. Bookings with anyone else are confirmed straight away. */
-      const toDemoSeller = listing.sellerId === db.seller.id;
-      const confirmed = kind === "ticket" || (kind === "service" && (!toDemoSeller || db.seller.settings.instantBook));
-      const order = { id: newId("order"), listingId, kind, status: confirmed ? "confirmed" : "requested", quantity: count, total: listing.price * count, placedAt: now() };
-      if (kind === "service") Object.assign(order, { date, time });
-      if (kind === "product") order.note = "Pickup details come after the seller accepts";
-      if (kind === "ticket") Object.assign(order, { note: listing.availability, ticketCode: makeTicketCode(), ticketStatus: "valid" });
-      if (kind !== "service") {
-        listing.quantityAvailable -= count;
-        if (kind === "product" && listing.quantityAvailable === 0) listing.status = "soldout";
+    getOrders: async () => {
+      try {
+        const { orders } = await ccFetch("/orders?role=buyer");
+        return orders;
+      } catch {
+        return db.buyer.orders;
       }
-      db.buyer.orders.unshift(order);
-      if (toDemoSeller) deliverToSeller(order, listing);
+    },
+
+    estimateOrder: async ({ listingId, date, time, quantity }) => {
+      const payload = await ccFetch("/orders/line-items", {
+        method: "POST",
+        body: { listingId, date, time, quantity }
+      });
+      return payload;
+    },
+
+    /**
+     * Starts checkout with a Stripe payment method id, then the client confirms the PaymentIntent
+     * and calls confirmOrderPayment.
+     */
+    placeOrder: async ({ listingId, date, time, quantity, paymentMethodId, note }) => {
+      const payload = await ccFetch("/orders", {
+        method: "POST",
+        body: { listingId, date, time, quantity, paymentMethodId, note }
+      });
+      return payload;
+    },
+
+    confirmOrderPayment: async (orderId) => {
+      const { order } = await ccFetch(`/orders/${encodeURIComponent(orderId)}/confirm-payment`, {
+        method: "POST",
+        body: {}
+      });
       return order;
     },
+
+    orderAction: async (orderId, action, body = {}) => {
+      const { order } = await ccFetch(
+        `/orders/${encodeURIComponent(orderId)}/actions/${encodeURIComponent(action)}`,
+        { method: "POST", body }
+      );
+      return order;
+    },
+
+    /** Buyer confirms pickup ("Got it"). */
+    confirmOrderReceived: (orderId) => api.orderAction(orderId, "mark-received"),
+
+    /** Buyer opens a dispute after the seller marked the order ready / delivered. */
+    reportOrderProblem: (orderId, { reason, message } = {}) =>
+      api.orderAction(orderId, "dispute", { reason, message }),
+
+    /** Leave a review after the order is complete. */
+    submitOrderReview: (orderId, { rating, content } = {}) =>
+      api.orderAction(orderId, "review-customer", { rating, content }),
 
     /* Messages and notifications, for whoever is signed in */
 
@@ -548,50 +582,53 @@ const api = (() => {
     /* Selling: orders */
 
     /** Newest activity first. */
-    getSellerOrders: () => [...db.seller.orders].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
+    getSellerOrders: async () => {
+      try {
+        const { orders } = await ccFetch("/orders?role=seller");
+        return orders;
+      } catch {
+        return [...db.seller.orders].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+      }
+    },
 
-    /** Moves an order to "confirmed", "ready", "completed" or "cancelled". Cancelling takes a `reason`. */
-    updateOrderStatus: (id, status, { reason } = {}) => {
-      const order = find(db.seller.orders, id, "order");
-      if (!NEXT_STATUSES[order.status]?.includes(status)) fail("That order can't move to that step.");
-      const declined = order.status === "requested" && status === "cancelled";
-      const listing = listingOf(order);
-      if (status === "completed") completeSellerOrder(order);
-      else Object.assign(order, { status, updatedAt: now() });
-      if (status === "confirmed" && order.kind === "product") order.when = "Accepted · prep for pickup";
-      if (status === "ready") order.when = `Pickup ready · ${listing?.meeting || "Campus"}`;
+    /**
+     * Seller Hub buttons. Products never accept (purchase has no accept step). Reschedule and
+     * request-review are removed. Cancel/complete for paid orders go through the operator API.
+     */
+    updateOrderStatus: async (id, status, { reason, message } = {}) => {
+      if (status === "confirmed") return api.orderAction(id, "accept");
+      if (status === "ready") {
+        const { order } = await ccFetch(`/orders/${encodeURIComponent(id)}/ready-for-pickup`, {
+          method: "POST",
+          body: {}
+        });
+        return order;
+      }
+      if (status === "completed") {
+        const { order } = await ccFetch(`/orders/${encodeURIComponent(id)}/operator/complete`, {
+          method: "POST",
+          body: {}
+        });
+        return order;
+      }
       if (status === "cancelled") {
-        order.cancelReason = `${declined ? "Declined" : "Cancelled and refunded"}: ${reason || "No reason given"}.`;
-        if (order.kind === "product" && listing) {
-          listing.quantityAvailable += order.qty;
-          if (listing.status === "soldout") listing.status = "active";
+        // Declining a booking request uses the provider decline transition.
+        try {
+          return await api.orderAction(id, "decline", { reason, message });
+        } catch {
+          const { order } = await ccFetch(`/orders/${encodeURIComponent(id)}/operator/cancel`, {
+            method: "POST",
+            body: { reason, message }
+          });
+          return order;
         }
       }
-      const service = order.kind === "service";
-      syncBuyerOrder(order, {
-        confirmed: service ? "Booking confirmed" : "Order accepted",
-        ready: "Ready for pickup",
-        completed: service ? "Session completed" : "Order completed",
-        cancelled: declined ? "Request declined" : "Order cancelled"
-      }[status]);
-      return order;
+      fail("That order can't move to that step.");
     },
 
-    rescheduleOrder: (id, { date, time }) => {
-      const order = find(db.seller.orders, id, "order");
-      if (!(date && time)) fail("Pick a new time.");
-      Object.assign(order, { date, time, updatedAt: now() });
-      syncBuyerOrder(order, "Booking rescheduled");
-      return order;
-    },
+    rescheduleOrder: () => fail("Reschedule is not available. Message the buyer and cancel if you need a new time."),
 
-    requestReview: (id) => {
-      const order = find(db.seller.orders, id, "order");
-      if (order.status !== "completed") fail("Ask for a review once the order is completed.");
-      order.reviewRequested = true;
-      syncBuyerOrder(order, "Leave a review");
-      return order;
-    },
+    requestReview: () => fail("Campus Connect sends review reminders automatically."),
 
     /** Checks a ticket code at the door. Returns { ok, title, message } and marks a valid ticket used. */
     scanTicket: (code) => {
@@ -700,30 +737,34 @@ const api = (() => {
     /* Selling: payouts */
 
     /** { available, pending, method, schedule, history: [{ id, at, amount, status }] } */
-    getPayouts: () => ({
-      ...db.seller.payouts,
-      pending: db.seller.orders.filter((order) => ["confirmed", "ready"].includes(order.status)).reduce((sum, order) => sum + order.amount, 0)
-    }),
-
-    withdraw: (amount) => {
-      const payouts = db.seller.payouts;
-      const value = Math.round(Number(amount) * 100) / 100;
-      if (!(value > 0)) fail("Enter an amount to withdraw.");
-      if (value > payouts.available) fail(`Only ${dollars(payouts.available)} is available.`);
-      payouts.available = Math.round((payouts.available - value) * 100) / 100;
-      payouts.history.unshift({ id: newId("po"), at: now(), amount: value, status: "Processing" });
-      return payouts.history[0];
+    getPayouts: async () => {
+      try {
+        const { payouts } = await ccFetch("/payouts");
+        return payouts;
+      } catch {
+        return {
+          ...db.seller.payouts,
+          pending: db.seller.orders
+            .filter((order) => ["confirmed", "ready"].includes(order.status))
+            .reduce((sum, order) => sum + order.amount, 0)
+        };
+      }
     },
 
-    updatePayoutMethod: ({ type, last4 }) => {
-      if (!/^\d{4}$/.test(String(last4 ?? ""))) fail("Enter the last four digits of the account.");
-      db.seller.payouts.method = `${type === "Savings" ? "Savings" : "Checking"} ••${last4}`;
-    }
+    withdraw: () => fail("Payouts go to your Stripe account on a schedule. There is no manual withdraw."),
+
+    updatePayoutMethod: () =>
+      fail("Connect or update payouts through Stripe Connect from the Payouts page.")
   };
 
   /* Every endpoint is async and copies what goes in and what comes out, the way a request would. */
   const copy = (value) => (value === undefined ? undefined : structuredClone(value));
-  const remote = Object.fromEntries(Object.entries(endpoints).map(([name, endpoint]) => [name, async (...args) => copy(endpoint(...copy(args)))]));
+  const remote = Object.fromEntries(
+    Object.entries(endpoints).map(([name, endpoint]) => [
+      name,
+      async (...args) => copy(await endpoint(...copy(args)))
+    ])
+  );
 
   return {
     ...remote,

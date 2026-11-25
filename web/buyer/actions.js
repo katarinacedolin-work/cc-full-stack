@@ -36,6 +36,36 @@ async function openConversation(about) {
   setView("inbox", { selectedConversationId: conversation.id });
 }
 
+function openOrderProblemModal(orderId) {
+  renderModal(`<div class="eyebrow">Report a problem</div><h2>What went wrong?</h2>
+    <p class="muted">We hold the payout while support looks at this. Pick a reason and add a short note.</p>
+    <form data-form="submit-order-problem" data-id="${escapeHtml(orderId)}">
+      <div class="field"><label for="order-problem-reason">Reason</label><select id="order-problem-reason" name="reason" required>
+        <option value="did-not-receive">I did not get it</option>
+        <option value="not-as-described">Not as described</option>
+        <option value="other">Something else</option>
+      </select></div>
+      <div class="field"><label for="order-problem-message">What should we know?</label><textarea id="order-problem-message" name="message" required placeholder="A short note helps support resolve this faster."></textarea></div>
+      <div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="danger-button" type="submit">Report problem</button></div>
+    </form>`);
+}
+
+function openOrderReviewModal(orderId) {
+  renderModal(`<div class="eyebrow">Leave a review</div><h2>How did it go?</h2>
+    <p class="muted">Reviews are public and tied to this completed order.</p>
+    <form data-form="order-review" data-id="${escapeHtml(orderId)}">
+      <div class="field"><label for="order-review-rating">Rating</label><select id="order-review-rating" name="rating" required>
+        <option value="5">5 · Excellent</option>
+        <option value="4">4 · Good</option>
+        <option value="3">3 · Okay</option>
+        <option value="2">2 · Poor</option>
+        <option value="1">1 · Bad</option>
+      </select></div>
+      <div class="field"><label for="order-review-content">Review (optional)</label><textarea id="order-review-content" name="content" placeholder="What should other students know?"></textarea></div>
+      <div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Submit review ${icon("star")}</button></div>
+    </form>`);
+}
+
 /* ---------- Actions ---------- */
 
 Object.assign(ACTIONS, {
@@ -80,15 +110,71 @@ Object.assign(ACTIONS, {
   },
   "increase-quantity": update(() => ({ quantity: Math.max(1, Math.min(getListing(state.selectedListingId).quantityAvailable, state.quantity + 1)) })),
   "decrease-quantity": update(() => ({ quantity: Math.max(1, state.quantity - 1) })),
-  "start-checkout": (target) => setView("checkout", { selectedListingId: target.dataset.id }),
-  "back-from-checkout": () => setView("listing"),
+  "start-checkout": async (target) => {
+    const listingId = target.dataset.id;
+    const listing = getListing(listingId);
+    if (listing?.kind === "service" && !(state.booking?.date && state.booking?.time)) {
+      throw new Error("Pick a date and time first.");
+    }
+    if (!state.config) {
+      try {
+        state.config = await api.getConfig();
+      } catch {
+        state.config = {};
+      }
+    }
+    let checkoutEstimate = null;
+    try {
+      checkoutEstimate = await api.estimateOrder({
+        listingId,
+        date: state.booking?.date,
+        time: state.booking?.time,
+        quantity: state.quantity
+      });
+    } catch {
+      checkoutEstimate = null;
+    }
+    setView("checkout", { selectedListingId: listingId, checkoutEstimate });
+    await mountCheckoutCard(state.config?.stripePublishableKey);
+  },
+  "back-from-checkout": () => {
+    unmountCardElement();
+    setView("listing", { checkoutEstimate: null });
+  },
   "confirm-order": async (target) => {
+    const listingId = target.dataset.id;
+    const publishableKey = state.config?.stripePublishableKey;
+    if (!publishableKey) throw new Error("Checkout is not configured yet. Add a Stripe publishable key.");
+
+    const paymentMethodId = await createCardPaymentMethod(publishableKey, {
+      name: data.account.displayName || undefined,
+      email: data.session.email || undefined
+    });
     const { date, time } = state.booking || {};
-    const order = await api.placeOrder({ listingId: target.dataset.id, date, time, quantity: state.quantity });
+    const payload = await api.placeOrder({
+      listingId,
+      date,
+      time,
+      quantity: state.quantity,
+      paymentMethodId
+    });
+    if (payload.clientSecret) {
+      await confirmCardPayment(publishableKey, payload.clientSecret);
+    }
+    const order = await api.confirmOrderPayment(payload.transactionId || payload.order?.id);
+    unmountCardElement();
     await load("orders", "listings");
-    setView("order", { selectedOrderId: order.id });
+    setView("order", { selectedOrderId: order.id, checkoutEstimate: null });
+    showToast("Payment received. Your order is in.");
   },
   "open-order": (target) => setView("order", { selectedOrderId: target.dataset.id }),
+  "got-it": async (target) => {
+    await api.confirmOrderReceived(target.dataset.id);
+    await refresh("orders", "notifications");
+    showToast("Marked as received. Thanks for confirming.");
+  },
+  "report-order-problem": (target) => openOrderProblemModal(target.dataset.id),
+  "open-order-review": (target) => openOrderReviewModal(target.dataset.id),
 
   /* Sellers and stores */
 
@@ -234,6 +320,32 @@ Object.assign(FORMS, {
     const method = await api.addPaymentMethod(fields);
     await refresh("paymentMethods");
     showToast(`${method.brand} ending in ${method.last4} saved for this session.`);
+  },
+
+  "submit-order-problem": async (fields, form) => {
+    const order = data.orders.find((entry) => entry.id === form.dataset.id);
+    if (order?.kind === "product") {
+      await api.reportOrderProblem(form.dataset.id, fields);
+    } else {
+      // Services and tickets have no dispute transition; file a support case until the reports table lands.
+      await api.createSupportCase({
+        topic: `Order problem · ${fields.reason}`,
+        message: `Order ${form.dataset.id}: ${fields.message}`
+      });
+    }
+    closeModal();
+    await refresh("orders", "notifications");
+    showToast("Problem reported. Support will follow up from this order.");
+  },
+
+  "order-review": async (fields, form) => {
+    await api.submitOrderReview(form.dataset.id, {
+      rating: Number(fields.rating),
+      content: fields.content
+    });
+    closeModal();
+    await refresh("orders", "notifications");
+    showToast("Thanks for the review.");
   },
 
   "publish-listing": async (fields) => {
