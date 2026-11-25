@@ -5,14 +5,47 @@
 const { types } = require('sharetribe-flex-sdk');
 const { getSdk } = require('../../api-util/sdk');
 const { httpError } = require('../auth/httpError');
-const { toCampusListing, toSharetribeAttrs } = require('../listings/mapListing');
+const {
+  toCampusListing,
+  toSharetribeAttrs,
+  openAvailabilityPlan,
+} = require('../listings/mapListing');
 
 const { UUID } = types;
 
 const LISTING_INCLUDE = {
   expand: true,
-  include: ['author', 'images'],
+  include: ['author', 'images', 'currentStock'],
   'fields.image': ['variants.listing-card', 'variants.scaled-medium', 'variants.landscape-crop'],
+};
+
+// Products and tickets are sold from Sharetribe stock; a service is booked by time instead.
+const usesStock = kind => kind === 'product' || kind === 'ticket';
+
+const wholeNumber = value => Math.max(0, Math.floor(Number(value)) || 0);
+
+/**
+ * Sets how many of a listing are left to sell.
+ *
+ * @param {Object} sdk Marketplace SDK for the seller
+ * @param {Object} listingId UUID
+ * @param {number|null} oldTotal what Sharetribe has now, or null when stock was never set
+ * @param {number} newTotal
+ */
+const setStock = (sdk, listingId, oldTotal, newTotal) =>
+  sdk.stock.compareAndSet({ listingId, oldTotal, newTotal });
+
+const showOwn = async (sdk, id) => {
+  const response = await sdk.ownListings.show({ id, ...LISTING_INCLUDE });
+  return { listing: response.data.data, included: response.data.included || [] };
+};
+
+const currentStockOf = (listing, included) => {
+  const ref = listing.relationships?.currentStock?.data;
+  const stock = ref
+    ? included.find(entity => entity.type === 'stock' && entity.id.uuid === ref.id.uuid)
+    : null;
+  return stock ? stock.attributes.quantity : null;
 };
 
 const requireUser = async (req, res) => {
@@ -143,27 +176,28 @@ exports.create = async (req, res) => {
     ? fields.imageIds.map(id => new UUID(id))
     : undefined;
 
-  try {
-    const created = await sdk.ownListings.createDraft(
-      { ...attrs, ...(imageIds ? { images: imageIds } : {}) },
-      LISTING_INCLUDE
-    );
-    let listing = created.data.data;
-    let included = created.data.included || [];
+  const kind = attrs.publicData.kind;
+  if (kind === 'service') {
+    attrs.availabilityPlan = openAvailabilityPlan();
+  }
 
-    if (!fields.draft) {
-      const published = await sdk.ownListings.publishDraft({ id: listing.id }, LISTING_INCLUDE);
-      listing = published.data.data;
-      included = published.data.included || included;
-      try {
-        const opened = await sdk.ownListings.open({ id: listing.id }, LISTING_INCLUDE);
-        listing = opened.data.data;
-        included = opened.data.included || included;
-      } catch (openError) {
-        // Some listing types open on publish.
-      }
+  try {
+    const created = await sdk.ownListings.createDraft({
+      ...attrs,
+      ...(imageIds ? { images: imageIds } : {}),
+    });
+    const id = created.data.data.id;
+
+    if (usesStock(kind)) {
+      const quantity = wholeNumber(fields.quantityAvailable ?? fields.quantity) || 1;
+      await setStock(sdk, id, null, quantity);
     }
 
+    if (!fields.draft) {
+      await sdk.ownListings.publishDraft({ id });
+    }
+
+    const { listing, included } = await showOwn(sdk, id);
     res.status(201).json({ listing: toCampusListing(listing, included) });
   } catch (e) {
     throw httpError(
@@ -180,37 +214,55 @@ exports.create = async (req, res) => {
 exports.update = async (req, res) => {
   const { sdk } = await requireUser(req, res);
   const fields = req.body || {};
-  const attrs = toSharetribeAttrs(fields);
+  const id = asUuid(req.params.id);
   const imageIds = Array.isArray(fields.imageIds)
-    ? fields.imageIds.map(id => new UUID(id))
+    ? fields.imageIds.map(imageId => new UUID(imageId))
     : undefined;
 
-  // Only send fields the client included, so a partial edit does not wipe the rest.
-  const update = { id: asUuid(req.params.id) };
+  let current;
+  try {
+    current = await showOwn(sdk, id);
+  } catch (e) {
+    throw httpError(404, 'listing-not-found', 'That listing is no longer here.');
+  }
+
+  // A partial edit is laid over what the listing has now, so the fields the client left out
+  // keep their values instead of going back to defaults.
+  const before = toCampusListing(current.listing, current.included);
+  const attrs = toSharetribeAttrs({ ...before, ...fields });
+  const kind = attrs.publicData.kind;
+
+  const update = { id };
   if ('title' in fields) update.title = attrs.title;
   if ('description' in fields) update.description = attrs.description;
   if ('price' in fields) update.price = attrs.price;
-  if (Object.keys(attrs.publicData || {}).length) {
-    // Merge onto existing publicData so we do not drop rating/reviews written by the worker.
-    const current = await sdk.ownListings.show({ id: update.id });
-    update.publicData = {
-      ...(current.data.data.attributes.publicData || {}),
-      ...attrs.publicData,
-    };
-  }
+  // Merge onto existing publicData so we do not drop rating/reviews written by the worker.
+  update.publicData = {
+    ...(current.listing.attributes.publicData || {}),
+    ...attrs.publicData,
+  };
   if (imageIds) update.images = imageIds;
 
   try {
     if (fields.status === 'active') {
-      await sdk.ownListings.open({ id: update.id });
+      await sdk.ownListings.open({ id });
     }
     if (fields.status === 'closed' || fields.status === 'paused') {
-      await sdk.ownListings.close({ id: update.id });
+      await sdk.ownListings.close({ id });
     }
-    const response = await sdk.ownListings.update(update, LISTING_INCLUDE);
-    res.json({
-      listing: toCampusListing(response.data.data, response.data.included || []),
-    });
+    await sdk.ownListings.update(update);
+
+    const wantsStock = 'quantityAvailable' in fields || 'quantity' in fields;
+    if (usesStock(kind) && wantsStock) {
+      const oldTotal = currentStockOf(current.listing, current.included);
+      const newTotal = wholeNumber(fields.quantityAvailable ?? fields.quantity);
+      if (oldTotal !== newTotal) {
+        await setStock(sdk, id, oldTotal, newTotal);
+      }
+    }
+
+    const { listing, included } = await showOwn(sdk, id);
+    res.json({ listing: toCampusListing(listing, included) });
   } catch (e) {
     throw httpError(
       e.status || 400,
@@ -225,11 +277,8 @@ exports.update = async (req, res) => {
  */
 exports.duplicate = async (req, res) => {
   const { sdk } = await requireUser(req, res);
-  const original = await sdk.ownListings.show({
-    id: asUuid(req.params.id),
-    ...LISTING_INCLUDE,
-  });
-  const listing = original.data.data;
+  const original = await showOwn(sdk, asUuid(req.params.id));
+  const listing = original.listing;
   const attrs = listing.attributes;
   const publicData = { ...(attrs.publicData || {}) };
   delete publicData.rating;
@@ -238,18 +287,20 @@ exports.duplicate = async (req, res) => {
   delete publicData.tag;
 
   try {
-    const created = await sdk.ownListings.createDraft(
-      {
-        title: `${attrs.title} (copy)`,
-        description: attrs.description,
-        price: attrs.price,
-        publicData,
-      },
-      LISTING_INCLUDE
-    );
-    res.status(201).json({
-      listing: toCampusListing(created.data.data, created.data.included || []),
+    const created = await sdk.ownListings.createDraft({
+      title: `${attrs.title} (copy)`,
+      description: attrs.description,
+      price: attrs.price,
+      publicData,
+      ...(attrs.availabilityPlan ? { availabilityPlan: attrs.availabilityPlan } : {}),
     });
+    const id = created.data.data.id;
+    if (usesStock(publicData.kind)) {
+      const quantity = currentStockOf(listing, original.included) || 1;
+      await setStock(sdk, id, null, quantity);
+    }
+    const copy = await showOwn(sdk, id);
+    res.status(201).json({ listing: toCampusListing(copy.listing, copy.included) });
   } catch (e) {
     throw httpError(
       e.status || 400,
