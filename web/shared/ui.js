@@ -39,6 +39,16 @@ async function refresh(...keys) {
   render();
 }
 
+/**
+ * Shows what changed without the user doing anything (see api.subscribe), after the data was loaded again.
+ * The views named in `liveViews` are redrawn. Anywhere else only the header's badges and bell are, so a form
+ * someone is filling in is left alone.
+ */
+function showChanges(liveViews) {
+  if (liveViews.includes(state.view)) render();
+  else updateChrome();
+}
+
 /* ---------- Toasts and modals ---------- */
 
 function showToast(message, type = "success") {

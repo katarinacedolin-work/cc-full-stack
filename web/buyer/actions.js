@@ -9,7 +9,10 @@ const update = (changes) => (target) => {
 };
 
 const STORE_PAGE_DEFAULTS = { storeTab: "shop", storeCollection: "All", storeQuery: "", storeKind: "all" };
-const ACCOUNT_SETTING_LABELS = { notifyMessages: "Message notifications", notifyOrders: "Order notifications", notifyHousing: "Housing & subleases", profileVisible: "Profile visibility", showCampus: "Campus on your profile" };
+const ACCOUNT_SETTING_LABELS = { notifyMessages: "Message notifications", notifyOrders: "Order notifications", profileVisible: "Profile visibility", showCampus: "Campus on your profile" };
+
+/** The buyer views that redraw when a message, a notification or an order changes on its own. */
+const BUYER_LIVE_VIEWS = ["inbox", "you", "order"];
 
 /** Opens a listing page. A service also needs its open times, which are fetched first. */
 async function openListing(id, detailReturn = null) {
@@ -193,7 +196,7 @@ Object.assign(ACTIONS, {
 
   /* Messages */
 
-  "message-seller": (target) => openConversation({ sellerId: target.dataset.seller, listingId: target.dataset.listing }),
+  "message-seller": (target) => openConversation({ sellerId: target.dataset.seller, listingId: target.dataset.listing, orderId: target.dataset.order }),
   "message-store": (target) => openConversation({ sellerId: getStore(target.dataset.id).sellerId }),
   "message-agent": (target) => openConversation({ agentId: target.dataset.id }),
   "message-board-item": (target) => openConversation(target.dataset.kind === "job" ? { jobId: target.dataset.id } : { housingId: target.dataset.id }),
@@ -278,8 +281,11 @@ Object.assign(FORMS, {
     render();
   },
 
-  "send-message": async ({ message }) => {
-    await api.sendMessage(selectedConversation().id, message);
+  "send-message": async ({ message }, form) => {
+    const conversation = await api.sendMessage(form.dataset.id, message);
+    /* Sent, so it is no longer a draft to keep across the redraw. */
+    form.reset();
+    state.selectedConversationId = conversation.id;
     await refresh("conversations");
   },
   "send-ticket-dm": async ({ message }) => {
@@ -314,8 +320,8 @@ Object.assign(FORMS, {
 
   "save-account": async ({ displayName }) => {
     await api.updateAccount({ displayName });
-    await refresh("account", "sellers", "listings");
-    showToast("Account saved for this demo session.");
+    await refresh("account", "session", "sellers", "listings");
+    showToast("Account saved.");
   },
   "save-payment": async (fields) => {
     const method = await api.addPaymentMethod(fields);
@@ -361,8 +367,16 @@ Object.assign(FORMS, {
 /* ---------- Notifications ---------- */
 
 Object.assign(NOTIFICATION_TARGETS, {
-  order: (notification) => setView("order", { selectedOrderId: notification.orderId }),
-  inbox: (notification) => setView("inbox", { selectedConversationId: notification.conversationId }),
+  /* What the notification is about may be newer than what the page last loaded. */
+  order: async (notification) => {
+    await load("orders");
+    if (!data.orders.some((order) => order.id === notification.orderId)) return setView("you");
+    setView("order", { selectedOrderId: notification.orderId });
+  },
+  inbox: async (notification) => {
+    await load("conversations");
+    setView("inbox", { selectedConversationId: notification.conversationId });
+  },
   store: (notification) => openStore(notification.storeId),
   listing: (notification) => openListing(notification.listingId)
 });
@@ -398,11 +412,17 @@ if (!IS_SELLER) {
     const open = state.view === "inbox" && selectedConversation();
     if (!open?.unread) return;
     await api.markConversationRead(open.id);
-    await refresh("conversations");
+    /* Reading a conversation also clears its notification. */
+    await refresh("conversations", "notifications");
   }));
 
-  /* The poster of a chore you offered to take approves and pays on their own time. */
   api.subscribe((event) => run(async () => {
+    /* A new message, a notification, or a seller acting on one of your orders. */
+    if (event.type === "changed") {
+      await load("conversations", "notifications", "orders");
+      return showChanges(BUYER_LIVE_VIEWS);
+    }
+    /* The poster of a chore you offered to take approves and pays on their own time. */
     if (event.type !== "chore-paid") return;
     await load("chores", "orders", "conversations");
     showToast(`${firstName(event.poster)} approved you and paid through Campus Connect.`);

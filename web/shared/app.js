@@ -13,7 +13,9 @@
 
 function render() {
   const view = VIEWS[state.view] || VIEWS[HOME_VIEW];
+  const draft = chatDraft();
   document.querySelector("#app-main").innerHTML = view();
+  restoreChatDraft(draft);
   updateChrome();
   document.querySelectorAll(".chat-messages").forEach((thread) => { thread.scrollTop = thread.scrollHeight; });
   document.dispatchEvent(new CustomEvent("app:render"));
@@ -23,6 +25,31 @@ function render() {
       if (errors) errors.textContent = error.message;
     });
   }
+}
+
+/**
+ * A message that is being typed survives a redraw. New messages arrive while someone is writing, and
+ * the page redraws to show them.
+ */
+function chatDraft() {
+  const box = document.querySelector(".chat-composer textarea");
+  if (!box || !box.value) return null;
+  return {
+    conversationId: box.form.dataset.id,
+    text: box.value,
+    focused: document.activeElement === box,
+    start: box.selectionStart,
+    end: box.selectionEnd
+  };
+}
+
+function restoreChatDraft(draft) {
+  const box = document.querySelector(".chat-composer textarea");
+  if (!draft || !box || box.form.dataset.id !== draft.conversationId) return;
+  box.value = draft.text;
+  if (!draft.focused) return;
+  box.focus();
+  box.setSelectionRange(draft.start, draft.end);
 }
 
 /** The header: which link is current, the unread badges, the avatar and the notification popover. */

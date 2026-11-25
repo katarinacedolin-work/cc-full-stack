@@ -17,6 +17,9 @@ const log = require('../../log');
 const db = require('../db');
 const { parseSlot, durationMinutes } = require('../time');
 const { toCampusOrder, BOOKING_PROCESS, PURCHASE_PROCESS } = require('../orders/mapOrder');
+const { processAliasFor } = require('../listings/mapListing');
+const notifications = require('../notifications/store');
+const { readyKey } = require('../notifications/orderEvents');
 const { eventProblem } = require('../tickets/rules');
 const { issueFor } = require('../tickets/complete');
 const ticketStore = require('../tickets/store');
@@ -47,14 +50,6 @@ const requireUser = async (req, res) => {
 const sharetribeMessage = (error, fallback) => {
   const first = error?.data?.errors?.[0];
   return first?.title || first?.detail || fallback;
-};
-
-const processAliasFor = listing => {
-  const fromListing = listing.attributes?.publicData?.transactionProcessAlias;
-  if (fromListing) return fromListing;
-  const kind = listing.attributes?.publicData?.kind;
-  if (kind === 'service') return `${BOOKING_PROCESS}/release-1`;
-  return `${PURCHASE_PROCESS}/release-1`;
 };
 
 const getFlags = async transactionId => {
@@ -106,6 +101,37 @@ const setReadyFlag = async (transactionId, ready) => {
            updated_at = now()`,
     [transactionId, ready]
   );
+};
+
+// Puts "Ready for pickup" on the buyer's bell. The worker writes the same notification when it
+// sees the order marked delivered; they share a key, so the buyer is told once.
+const notifyReady = async (tx, included) => {
+  const buyerId = tx.relationships?.customer?.data?.id?.uuid;
+  const sellerId = tx.relationships?.provider?.data?.id?.uuid;
+  const listing = included.find(
+    entity =>
+      entity.type === 'listing' && entity.id.uuid === tx.relationships?.listing?.data?.id?.uuid
+  );
+  const publicData = listing?.attributes?.publicData || {};
+  try {
+    await notifications.write({
+      userId: buyerId,
+      side: 'buyer',
+      category: 'orders',
+      setting: 'notifyOrders',
+      title: 'Ready for pickup',
+      body: listing?.attributes?.title || 'Campus Connect order',
+      emoji: publicData.emoji || '',
+      accent: publicData.accent || 'cobalt',
+      action: 'order',
+      targetId: tx.id.uuid,
+      dedupeKey: readyKey(tx.id.uuid),
+    });
+    await notifications.touch([buyerId, sellerId]);
+  } catch (e) {
+    // The order itself is what matters. The bell catches up from Sharetribe's event feed.
+    log.error(e, 'cc-ready-notification-failed', { transactionId: tx.id.uuid });
+  }
 };
 
 const loadTransaction = async (sdk, id) => {
@@ -487,15 +513,10 @@ exports.readyForPickup = async (req, res) => {
   const { tx, included } = await loadTransaction(sdk, req.params.id);
   assertParticipant(tx, user.id.uuid, 'provider');
   await setReadyFlag(tx.id.uuid, true);
-  try {
-    await sdk.messages.send({
-      transactionId: tx.id,
-      content: 'Your order is ready for pickup.',
-    });
-  } catch (e) {
-    // Non-fatal.
-  }
-  // Prefer transitioning to mark-delivered when the process allows it.
+  await notifyReady(tx, included);
+
+  // Prefer transitioning to mark-delivered when the process allows it. Sharetribe then emails
+  // the buyer itself.
   try {
     const response = await sdk.transactions.transition(
       { id: tx.id, transition: 'transition/mark-delivered', params: {} },
@@ -507,6 +528,16 @@ exports.readyForPickup = async (req, res) => {
       }),
     });
   } catch (e) {
+    // The order can't take that step from where it is. A message still reaches the buyer by
+    // email.
+    try {
+      await sdk.messages.send({
+        transactionId: tx.id,
+        content: 'Your order is ready for pickup.',
+      });
+    } catch (messageError) {
+      // Non-fatal.
+    }
     const flags = { readyForPickup: true };
     res.json({ order: toCampusOrder(tx, included, flags) });
   }

@@ -535,7 +535,7 @@ function orderView(order) {
     actionButtons.push(`<button class="ghost-button" data-view="home">Keep exploring</button>`);
   }
 
-  return `<div class="page-top-row">${backToYou}${listing ? `<button class="ghost-button" data-action="message-seller" data-seller="${listing.sellerId}" data-listing="${listing.id}">${icon("chat")} Message seller</button>` : ""}</div>
+  return `<div class="page-top-row">${backToYou}${listing ? `<button class="ghost-button" data-action="message-seller" data-seller="${listing.sellerId}" data-listing="${listing.id}" data-order="${order.id}">${icon("chat")} Message seller</button>` : ""}</div>
     <div class="order-success">${cancelled || disputed ? "" : `<div class="success-mark">${icon("check")}</div>`}<div class="eyebrow">${eyebrow}</div><h1>${heading}</h1><p class="lede">${escapeHtml(lede)}</p><div class="order-detail-card">${rows}</div><div class="button-row">${actionButtons.join("")}</div></div>`;
 }
 
@@ -1094,7 +1094,7 @@ function inboxView() {
   const active = selectedConversation();
   if (!active) return `${header}<div class="empty-state"><div class="empty-shape">✉</div><h3>No messages yet.</h3><p class="muted">Message a seller from any listing and the conversation shows up here.</p><button class="primary-button" data-view="book">Find something to book ${icon("arrow")}</button></div>`;
   const rows = data.conversations.map((conversation) => `<button class="conversation-row ${conversation.id === active.id ? "active" : ""}" data-action="select-conversation" data-id="${conversation.id}">${personMark("span", "mini-avatar", conversation.initials, conversation.sellerId || conversation.name)}<span class="conversation-content"><span class="conversation-top"><span class="conversation-name">${escapeHtml(conversation.name)}</span><span class="conversation-time">${escapeHtml(conversationTime(conversation))}</span></span><span class="conversation-preview">${escapeHtml(conversationPreview(conversation))}</span></span>${conversation.unread ? `<span class="unread-dot" aria-label="Unread"></span>` : ""}</button>`).join("");
-  return `${header}<div class="inbox-layout"><aside class="conversation-list"><div class="conversation-header"><h2>Messages</h2></div>${rows}</aside><section class="chat-panel"><div class="chat-header"><div class="chat-person">${personMark("span", "mini-avatar", active.initials, active.sellerId || active.name)}<div><strong>${escapeHtml(active.name)}</strong><span>${escapeHtml(active.context)}</span></div></div><div class="button-row"><button class="icon-button" data-action="open-report" aria-label="Report conversation">${icon("shield")}</button><button class="icon-button" data-action="open-help" aria-label="Get help">${icon("help")}</button></div></div><div class="chat-messages">${messageBubbles(active.messages, `This is the start of your conversation with ${active.name}.`)}</div><form class="chat-composer" data-form="send-message"><textarea name="message" placeholder="Write a message…" aria-label="Write a message" rows="1"></textarea><button class="primary-button" type="submit" aria-label="Send message">${icon("arrow")}</button></form></section></div>`;
+  return `${header}<div class="inbox-layout"><aside class="conversation-list"><div class="conversation-header"><h2>Messages</h2></div>${rows}</aside><section class="chat-panel"><div class="chat-header"><div class="chat-person">${personMark("span", "mini-avatar", active.initials, active.sellerId || active.name)}<div><strong>${escapeHtml(active.name)}</strong><span>${escapeHtml(active.context)}</span></div></div><div class="button-row"><button class="icon-button" data-action="open-report" aria-label="Report conversation">${icon("shield")}</button><button class="icon-button" data-action="open-help" aria-label="Get help">${icon("help")}</button></div></div><div class="chat-messages">${messageBubbles(active.messages, `This is the start of your conversation with ${active.name}.`)}</div><form class="chat-composer" data-form="send-message" data-id="${active.id}"><textarea name="message" placeholder="Write a message…" aria-label="Write a message" rows="1" maxlength="2000" required></textarea><button class="primary-button" type="submit" aria-label="Send message">${icon("arrow")}</button></form></section></div>`;
 }
 
 /* ---------- You and settings ---------- */
@@ -1163,10 +1163,9 @@ function settingsPaymentPanel() {
 function settingsNotificationsPanel() {
   return `<div class="settings-group">
     <h2>What should reach you</h2>
-    <p class="muted small">These stay in the app for this prototype. Nothing is emailed.</p>
-    ${accountRow("notifyMessages", "Messages", "When a seller replies about a listing or order.")}
-    ${accountRow("notifyOrders", "Orders and bookings", "Pickup updates, confirmations and schedule changes.")}
-    ${accountRow("notifyHousing", "Housing & subleases", "New rooms and subleases near campus.")}
+    <p class="muted small">These switches are for the bell at the top of the page. Campus Connect always emails you about your orders, and about messages on a listing or an order, so nothing important is missed.</p>
+    ${accountRow("notifyMessages", "Messages", "When someone writes to you or replies.")}
+    ${accountRow("notifyOrders", "Orders and bookings", "Confirmations, pickup updates, cancellations and refunds.")}
   </div>`;
 }
 

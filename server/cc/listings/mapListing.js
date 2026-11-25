@@ -243,6 +243,17 @@ exports.toSharetribeAttrs = (fields, { currency = 'USD' } = {}) => {
   return attrs;
 };
 
+/**
+ * @param {Object} listing Sharetribe listing
+ * @returns {string} the transaction process its orders and questions go through
+ */
+exports.processAliasFor = listing => {
+  const publicData = listing.attributes?.publicData || {};
+  return (
+    publicData.transactionProcessAlias || PROCESS_ALIAS[publicData.kind] || PROCESS_ALIAS.product
+  );
+};
+
 exports.PROCESS_ALIAS = PROCESS_ALIAS;
 exports.UNIT_TYPE = UNIT_TYPE;
 exports.TIMEZONE = TIMEZONE;
