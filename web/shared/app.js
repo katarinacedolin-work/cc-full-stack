@@ -11,8 +11,18 @@
 
 /* ---------- Drawing ---------- */
 
+/** Seller Hub is only for people on the seller list. Everyone else sees the locked screen. */
+function sellerHubLocked() {
+  return IS_SELLER && !AUTH_VIEW_NAMES.includes(state.view) && !getSeller(myId());
+}
+
+function sellerLockedView() {
+  return `<div class="seller-page"><div class="empty-state seller-locked-state"><div class="empty-shape">${icon("shield", 26)}</div><h1>You don't have access to this page.</h1><p class="muted">Seller Hub is for students who sell on Campus Connect.</p><button type="button" class="text-button" data-action="open-help">Get help</button></div></div>`;
+}
+
 function render() {
-  const view = VIEWS[state.view] || VIEWS[HOME_VIEW];
+  document.body.classList.toggle("seller-locked", sellerHubLocked());
+  const view = sellerHubLocked() ? sellerLockedView : (VIEWS[state.view] || VIEWS[HOME_VIEW]);
   const draft = chatDraft();
   document.querySelector("#app-main").innerHTML = view();
   restoreChatDraft(draft);
@@ -213,6 +223,7 @@ document.addEventListener("click", (event) => {
   if (state.notificationsOpen && !event.target.closest(".header-popover-anchor")) toggleNotifications(false);
   const target = event.target.closest("[data-view], [data-action]");
   if (!target) return;
+  if (sellerHubLocked() && target.dataset.action !== "open-help" && target.dataset.action !== "close-modal" && target.dataset.action !== "switch-mode" && target.dataset.action !== "sign-out" && target.dataset.action !== "confirm-sign-out") return;
   if (target.dataset.view) return navigate(target.dataset.view);
   const handler = ACTIONS[target.dataset.action];
   if (handler) runOnce(target, handler, target, event);

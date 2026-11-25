@@ -184,9 +184,10 @@ const getFlagsFor = async transactionIds => {
  */
 exports.list = async (req, res) => {
   const { sdk, user } = await requireUser(req, res);
-  const role = req.query.role === 'seller' ? 'provider' : 'customer';
+  // Sharetribe accepts `order` (bought) and `sale` (sold). `customer` and `provider` are rejected.
+  const only = req.query.role === 'seller' ? 'sale' : 'order';
   const response = await sdk.transactions.query({
-    only: role,
+    only,
     ...TX_INCLUDE,
     perPage: 100,
   });
