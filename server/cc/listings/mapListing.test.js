@@ -1,5 +1,5 @@
 const { types } = require('sharetribe-flex-sdk');
-const { toCampusListing, toSharetribeAttrs } = require('./mapListing');
+const { toCampusListing, toSharetribeAttrs, openAvailabilityPlan } = require('./mapListing');
 
 const { UUID, Money } = types;
 
@@ -120,5 +120,60 @@ describe('toSharetribeAttrs', () => {
     });
     expect(attrs.publicData.kind).toBe('service');
     expect(attrs.publicData.unit).toBe('hour');
+  });
+
+  it('sets the process and unit type the checkout needs', () => {
+    const base = { title: 'A', description: 'B', price: 5 };
+    expect(toSharetribeAttrs({ ...base, kind: 'product' }).publicData).toMatchObject({
+      transactionProcessAlias: 'default-purchase/release-1',
+      unitType: 'item',
+    });
+    expect(toSharetribeAttrs({ ...base, kind: 'service' }).publicData).toMatchObject({
+      transactionProcessAlias: 'default-booking/release-1',
+      unitType: 'fixed',
+    });
+    expect(toSharetribeAttrs({ ...base, kind: 'ticket' }).publicData).toMatchObject({
+      transactionProcessAlias: 'cc-ticket/release-1',
+      unitType: 'item',
+    });
+  });
+
+  it('keeps a listing the same when its mapped form is saved again', () => {
+    const before = toCampusListing(listing, included);
+    const attrs = toSharetribeAttrs({ ...before, title: 'Calc II tutoring' });
+    expect(attrs.publicData).toMatchObject({
+      kind: 'service',
+      category: 'Learn',
+      unit: 'hour',
+      accent: 'sky',
+      storeId: 'store-1',
+    });
+  });
+});
+
+describe('stock', () => {
+  it('reads how many are left from Sharetribe stock when it is included', () => {
+    const product = {
+      ...listing,
+      attributes: {
+        ...listing.attributes,
+        publicData: { kind: 'product', quantityAvailable: 5 },
+      },
+      relationships: {
+        ...listing.relationships,
+        currentStock: { data: { id: new UUID('stock-1'), type: 'stock' } },
+      },
+    };
+    const stock = { id: new UUID('stock-1'), type: 'stock', attributes: { quantity: 2 } };
+    expect(toCampusListing(product, [...included, stock]).quantityAvailable).toBe(2);
+    expect(toCampusListing(product, included).quantityAvailable).toBe(5);
+  });
+});
+
+describe('openAvailabilityPlan', () => {
+  it('covers every day of the week', () => {
+    const plan = openAvailabilityPlan();
+    expect(plan.type).toBe('availability-plan/time');
+    expect(plan.entries).toHaveLength(7);
   });
 });
