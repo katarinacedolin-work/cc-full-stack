@@ -119,12 +119,15 @@ const page = file => (req, res) =>
 
 app.get('/', page('index.html'));
 app.get('/sell', page('seller.html'));
+// Sharetribe's built-in emails link to these exact paths.
+app.get('/verify-email', page('auth/verify-email.html'));
+app.get('/reset-password', page('auth/reset-password.html'));
 // The pages' relative links still use these file names. Send them to the real paths.
 app.get('/index.html', (req, res) => res.redirect(301, '/'));
 app.get('/seller.html', (req, res) => res.redirect(301, '/sell'));
 
 // Only the pages' own files are public. Anything else in web/, like its README, is not.
-const ASSET_FILE = /\.(css|js|png|jpe?g|svg)$/i;
+const ASSET_FILE = /\.(css|js|png|jpe?g|svg|html)$/i;
 const assets = express.static(webDir, { index: false });
 app.use((req, res, next) => (ASSET_FILE.test(req.path) ? assets(req, res, next) : next()));
 

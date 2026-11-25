@@ -5,4 +5,7 @@
  * returns early for the types it doesn't care about. A handler can run twice for the same
  * event (see poll.js), so running it again must not repeat its effect.
  */
-module.exports = [];
+
+const approveSdsuUsers = require('./handlers/approveSdsuUsers');
+
+module.exports = [approveSdsuUsers];

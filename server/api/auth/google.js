@@ -1,6 +1,8 @@
 const passport = require('passport');
 const GoogleStrategy = require('passport-google-oauth').OAuth2Strategy;
 const loginWithIdp = require('./loginWithIdp');
+const { isSdsuEmail } = require('../../cc/auth/sdsu');
+const { authErrorCookieOptions } = require('../../api-util/cookieOptions');
 
 const radix = 10;
 const PORT = parseInt(process.env.REACT_APP_DEV_API_SERVER_PORT, radix);
@@ -47,11 +49,21 @@ const verifyCallback = (req, accessToken, refreshToken, rawReturn, profile, done
   // With Google we want to use that id_token instead of accessToken in Sharetribe
   const idpToken = rawReturn.id_token;
 
-  const { email, given_name, family_name } = profile._json;
+  const { email, email_verified, given_name, family_name } = profile._json;
   const state = req.query.state;
   const queryParams = JSON.parse(state);
 
   const { from, defaultReturn, defaultConfirm, userType } = queryParams;
+
+  // SDSU email is on Microsoft 365; students use a personal Google account registered with
+  // their @sdsu.edu address. Do not send Google's `hd` hosted-domain parameter — it only
+  // matches Google Workspace domains and would hide those personal accounts.
+  if (!email_verified || !isSdsuEmail(email)) {
+    const err = new Error('Use a Google account registered with your verified @sdsu.edu email.');
+    err.status = 403;
+    err.code = 'sdsu-email-required';
+    return done(err, null);
+  }
 
   const userData = {
     email,
@@ -91,12 +103,10 @@ exports.authenticateGoogle = (req, res, next) => {
 
   const paramsAsString = JSON.stringify(params);
 
+  // Do not pass `hd`: SDSU email is Microsoft-hosted; students sign in with a personal
+  // Google account that uses their @sdsu.edu address.
   passport.authenticate('google', {
-    scope: [
-      'https://www.googleapis.com/auth/plus.login',
-      'https://www.googleapis.com/auth/userinfo.profile',
-      'https://www.googleapis.com/auth/userinfo.email',
-    ],
+    scope: ['openid', 'email', 'profile'],
     state: paramsAsString,
   })(req, res, next);
 };

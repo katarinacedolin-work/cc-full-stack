@@ -42,7 +42,7 @@ module.exports = (err, user, req, res, idpClientId, idpId) => {
         },
         authErrorCookieOptions()
       )
-      .redirect(`${rootUrl}/login#`);
+      .redirect(`${rootUrl}/?authError=1`);
   }
 
   if (!user) {
@@ -63,7 +63,7 @@ module.exports = (err, user, req, res, idpClientId, idpId) => {
         },
         authErrorCookieOptions()
       )
-      .redirect(`${rootUrl}/login#`);
+      .redirect(`${rootUrl}/?authError=1`);
   }
 
   const { from, defaultReturn, defaultConfirm, userType } = user;

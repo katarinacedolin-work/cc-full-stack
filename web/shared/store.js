@@ -11,7 +11,7 @@ const IS_SELLER = document.body.dataset.mode === "seller";
 const HOME_VIEW = IS_SELLER ? "seller-dashboard" : "home";
 
 const data = {
-  session: { userId: "" },
+  session: { userId: "", email: "", emailVerified: false, approved: false },
   categories: [],
   schoolServices: [],
   agents: [],
@@ -101,6 +101,11 @@ const NAVIGATION_DEFAULTS = {
 const state = {
   view: HOME_VIEW,
   notificationsOpen: false,
+  authError: "",
+  authEmail: "",
+  authNotice: "",
+  googleFirstName: "",
+  googleLastName: "",
   ...NAVIGATION_DEFAULTS,
 
   /* Buyer: what is open. The `…Return` keys remember which page a Back button goes to. */
