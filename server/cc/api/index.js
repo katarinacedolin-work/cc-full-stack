@@ -9,10 +9,13 @@ const express = require('express');
 const log = require('../../log');
 const asyncHandler = require('./asyncHandler');
 const auth = require('./auth');
+const listings = require('./listings');
+const images = require('./images');
+const stores = require('./stores');
 
 const router = express.Router();
 
-router.use(express.json());
+router.use(express.json({ limit: '2mb' }));
 
 // ================ Auth ================ //
 
@@ -25,6 +28,26 @@ router.post('/password-reset/confirm', asyncHandler(auth.confirmPasswordReset));
 router.post('/verify-email', asyncHandler(auth.verifyEmail));
 router.post('/resend-verification', asyncHandler(auth.resendVerification));
 router.post('/signup-with-google', asyncHandler(auth.signupWithGoogle));
+
+// ================ Listings and stores ================ //
+
+router.get('/listings', asyncHandler(listings.list));
+router.post('/listings', asyncHandler(listings.create));
+router.post('/listings/away', asyncHandler(listings.setAwayMode));
+router.get('/listings/:id', asyncHandler(listings.show));
+router.patch('/listings/:id', asyncHandler(listings.update));
+router.post('/listings/:id/duplicate', asyncHandler(listings.duplicate));
+router.delete('/listings/:id', asyncHandler(listings.remove));
+
+router.post(
+  '/images',
+  express.raw({ type: ['image/*', 'application/octet-stream'], limit: '10mb' }),
+  asyncHandler(images.upload)
+);
+
+router.get('/stores', asyncHandler(stores.list));
+router.get('/stores/:id', asyncHandler(stores.show));
+router.put('/stores/:id', asyncHandler(stores.upsert));
 
 // ================ Fallbacks ================ //
 
@@ -44,11 +67,9 @@ router.use((err, req, res, next) => {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
     return;
   }
-  res
-    .status(500)
-    .json({
-      error: { code: 'server-error', message: 'Something went wrong on our side. Please try again.' },
-    });
+  res.status(500).json({
+    error: { code: 'server-error', message: 'Something went wrong on our side. Please try again.' },
+  });
 });
 
 module.exports = router;

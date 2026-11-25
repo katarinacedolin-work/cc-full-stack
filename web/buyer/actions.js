@@ -42,7 +42,7 @@ Object.assign(ACTIONS, {
   /* Browsing */
 
   "choose-category": update((target) => ({ category: target.dataset.category })),
-  "clear-filters": update(() => ({ query: "", category: "All", trust: "any" })),
+  "clear-filters": update(() => ({ query: "", category: "All" })),
   "open-sort": () => openSortModal(),
   "open-filters": () => openFiltersModal(),
   "set-sort": (target) => {
@@ -185,9 +185,9 @@ Object.assign(ACTIONS, {
 
 Object.assign(FORMS, {
   "global-search": ({ query }) => setView("search", { query, category: "All" }),
-  filters: ({ category, trust }) => {
+  filters: ({ category }) => {
     closeModal();
-    Object.assign(state, { category, trust });
+    Object.assign(state, { category });
     render();
   },
 

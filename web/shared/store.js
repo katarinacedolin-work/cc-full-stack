@@ -85,7 +85,6 @@ const NAVIGATION_DEFAULTS = {
   query: "",
   category: "All",
   sort: "recommended",
-  trust: "any",
   storesFilter: "All",
   storesQuery: "",
   jobQuery: "",

@@ -90,14 +90,13 @@ function sellerPreviewBanner() {
   return `<div class="seller-preview-banner"><span>${icon("eye")} You're previewing what buyers see. Buyer actions are disabled here.</span><button type="button" class="text-button" data-action="seller-exit-preview">${icon("chevron-left")} Back to Seller Hub</button></div>`;
 }
 
-function premiumBanner(title, body, cta) {
-  if (data.sellerSettings.premium) return `<section class="sell-hero seller-premium"><div class="eyebrow">Premium</div><h2>Premium is on.</h2><p>${body}</p><button class="primary-button" data-action="seller-premium">Manage Premium ${icon("arrow")}</button></section>`;
-  return `<section class="sell-hero seller-premium"><div class="eyebrow">Premium</div><h2>${title}</h2><p>${body}</p><button class="primary-button" data-action="seller-premium">${cta} ${icon("arrow")}</button></section>`;
+/** Premium is hidden in v1. */
+function premiumBanner() {
+  return "";
 }
 
 function openPremiumModal() {
-  const on = data.sellerSettings.premium;
-  renderModal(`<div class="eyebrow">Premium</div><h2>${on ? "Premium is on." : "Turn a good profile into a full storefront."}</h2><p class="muted">Premium adds featured placement, extra profile sections, a badge buyers can see before they message you and a clearer view of who is looking at your listings.</p><div class="trust-note">Premium is a demo. Nothing is charged.</div><div class="modal-actions"><button class="ghost-button" data-action="close-modal">${on ? "Close" : "Not now"}</button><button class="${on ? "danger-button" : "primary-button"}" data-action="seller-toggle-premium">${on ? "Turn off Premium" : "Turn on Premium"}</button></div>`);
+  closeModal();
 }
 
 /* ---------- Dashboard ---------- */
@@ -585,7 +584,7 @@ function sellerAnalyticsView() {
       <section class="seller-card"><div class="seller-card-header"><div><h2>From view to order</h2><p class="muted small">Where buyers drop off</p></div></div><div class="funnel">${funnel.map((step, index) => `<div class="funnel-row"><div class="funnel-copy"><strong>${step.label}</strong><span class="muted small">${formatNumber(step.value)}${index ? ` · ${((step.value / Math.max(funnel[0].value, 1)) * 100).toFixed(1)}%` : ""}</span></div><div class="funnel-track"><span class="funnel-bar" style="width:${Math.max(3, (step.value / Math.max(funnel[0].value, 1)) * 100)}%"></span></div></div>`).join("")}</div></section>
       <section class="seller-card"><div class="seller-card-header"><div><h2>Where buyers come from</h2><p class="muted small">Share of listing views</p></div></div><div class="source-list">${data.analytics.sources.map((source, index) => `<div class="source-row"><span class="source-label"><span class="source-dot" style="background:${SOURCE_COLORS[index % SOURCE_COLORS.length]}"></span>${escapeHtml(source.label)}</span><span class="source-track"><span style="width:${source.share}%;background:${SOURCE_COLORS[index % SOURCE_COLORS.length]}"></span></span><strong>${source.share}%</strong></div>`).join("")}</div></section>
     </div>
-    ${premiumBanner("Turn a good profile into a full storefront.", "Premium adds featured placement, extra profile sections and a clearer view of who is looking at your listings.", "See what Premium includes")}
+    ${premiumBanner()}
     <section class="seller-card analytics-wide"><div class="seller-card-header"><div><h2>Top listings</h2><p class="muted small">All-time performance</p><button class="text-button" data-view="seller-listings">Manage listings ${icon("arrow")}</button></div></div>
       <div class="seller-table top-table"><div class="seller-table-head"><span>Listing</span><span>Views</span><span>Saves</span><span>Orders</span><span>Conversion</span></div>${listings.map((listing) => { const stats = statsFor(listing.id); return `<div class="seller-row"><div class="cell cell-main"><button type="button" class="row-title" data-action="seller-edit-listing" data-id="${listing.id}">${listingThumb(listing)}<span><span class="activity-title">${escapeHtml(listing.title)}</span><span class="activity-sub">${money(listing.price)} · ${LISTING_STATUS_LABELS[listingStatus(listing)]}</span></span></button></div><div class="cell" data-label="Views"><strong>${formatNumber(stats.views)}</strong></div><div class="cell" data-label="Saves"><strong>${formatNumber(stats.saves)}</strong></div><div class="cell" data-label="Orders"><strong>${formatNumber(stats.orders)}</strong></div><div class="cell" data-label="Conversion"><strong>${stats.views ? ((stats.orders / stats.views) * 100).toFixed(1) : "0.0"}%</strong></div></div>`; }).join("")}</div>
     </section>
@@ -702,7 +701,6 @@ function sellerAvailabilitySettings() {
     : `<button class="ghost-button compact" data-action="seller-connect-google">${icon("calendar")} Connect</button>`;
   return `<div class="settings-group"><h2>Availability</h2><p class="muted small">Control when buyers can book and buy.</p>
     ${sellerSettingsRow("awayMode", "Away mode", "Pause every active listing at once, for finals or a trip. Turning it off restores them.")}
-    ${sellerSettingsRow("instantBook", "Instant booking", "Let buyers book open slots without waiting for you to accept.")}
     <div class="settings-row"><div class="settings-row-copy"><strong>Google Calendar</strong><p class="muted small">${calendarCopy}</p></div>${calendarAction}</div>
     <div class="settings-row"><div class="settings-row-copy"><strong>Weekly hours</strong><p class="muted small">${slotDetail}</p></div><button class="ghost-button compact" data-view="seller-availability">${icon("calendar")} Manage</button></div></div>`;
 }

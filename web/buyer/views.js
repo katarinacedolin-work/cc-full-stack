@@ -227,7 +227,6 @@ function schoolProvidedSection() {
 }
 
 const SORT_OPTIONS = { recommended: "Recommended", "price-low": "Price: low to high", "price-high": "Price: high to low", rating: "Top rated" };
-const TRUST_OPTIONS = { any: "Any seller", verified: "Student verified", rated: "4.8+ rating" };
 
 /** The listings on a browse page ("service", "product" or "all") after search, category, filters and sort. */
 function browseResults(kind) {
@@ -238,8 +237,6 @@ function browseResults(kind) {
     if (kind === "product" && listing.merchandiseType === "resale") return false;
     if (listing.storeOnly && !searching) return false;
     if (state.category !== "All" && listing.category !== state.category) return false;
-    if (state.trust === "verified" && !listing.verified) return false;
-    if (state.trust === "rated" && !(Number(listing.rating) >= 4.8)) return false;
     return matchesSearch(state.query, listing.title, listing.seller, listing.category, listing.description, merchandiseTypeLabel(listing), getStore(listing.storeId)?.name || "");
   });
   const order = {
@@ -269,7 +266,7 @@ function browseView(kind) {
       ? `<section class="section section-browse-main"><div class="listing-grid listing-grid-recommended">${results.map(listingCard).join("")}</div></section>`
       : `<div class="listing-grid">${product ? productGrid : results.map(listingCard).join("")}</div>`
     : `<div class="empty-state"><div class="empty-shape">⌁</div><h3>No matches yet.</h3><p class="muted">Try another category or search for something nearby.</p><div class="button-row"><button class="ghost-button" data-action="clear-filters">Clear filters</button><button class="primary-button" data-view="sell">${product ? "List an item" : "List what you do"}</button></div></div>`;
-  const categoryBar = `<div class="category-row"><div class="filter-bar"><button type="button" class="filter-button category-chip ${state.category === "All" ? "active" : ""}" data-action="choose-category" data-category="All"><span class="category-chip-icon cobalt" aria-hidden="true">${icon("grid", 22)}</span>All</button>${categoryChips(kind)}</div><button type="button" class="ghost-button" data-action="open-filters">${icon("plus")} Filters${state.trust === "any" ? "" : " · 1"}</button></div>`;
+  const categoryBar = `<div class="category-row"><div class="filter-bar"><button type="button" class="filter-button category-chip ${state.category === "All" ? "active" : ""}" data-action="choose-category" data-category="All"><span class="category-chip-icon cobalt" aria-hidden="true">${icon("grid", 22)}</span>All</button>${categoryChips(kind)}</div><button type="button" class="ghost-button" data-action="open-filters">${icon("plus")} Filters${state.category === "All" ? "" : " · 1"}</button></div>`;
   const body = `${product ? "" : schoolProvidedSection()}
     ${matchingStores.length ? `<div class="search-stores">${storeScrollSection("Stores", matchingStores, { action: "search-stores", query, label: "See all matching stores" })}</div>` : ""}
     ${resultsHeader}
@@ -309,8 +306,7 @@ function openFiltersModal() {
     ? ["All", ...data.categories.filter((category) => shopCategoryNames().includes(category.name)).map((category) => category.name)]
     : ["All", ...data.categories.map((category) => category.name)];
   const categoryOptions = categoryNames.map((name) => option(name, name, name === state.category)).join("");
-  const trustOptions = Object.entries(TRUST_OPTIONS).map(([id, label]) => option(id, label, id === state.trust)).join("");
-  renderModal(`<div class="eyebrow">Browse controls</div><h2>Filter what you need.</h2><form data-form="filters"><div class="field"><label for="modal-category">Category</label><select id="modal-category" name="category">${categoryOptions}</select></div><div class="field"><label for="modal-trust">Trust signal</label><select id="modal-trust" name="trust">${trustOptions}</select></div><div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Apply filters</button></div></form>`);
+  renderModal(`<div class="eyebrow">Browse controls</div><h2>Filter what you need.</h2><form data-form="filters"><div class="field"><label for="modal-category">Category</label><select id="modal-category" name="category">${categoryOptions}</select></div><div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Apply filters</button></div></form>`);
 }
 
 /* ---------- Listing detail, checkout and orders ---------- */

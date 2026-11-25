@@ -282,72 +282,75 @@ const api = (() => {
     getAgents: () => db.agents,
     getApartments: () => db.apartments,
     getSellers: () => db.sellers,
-    getStores: () => db.stores,
+    getStores: async () => {
+      try {
+        const { stores } = await ccFetch("/stores");
+        return stores.length ? stores : db.stores;
+      } catch {
+        return db.stores;
+      }
+    },
     /** Services booked from weekly hours also carry `nextOpening` ({ date, time } or null). */
-    getListings: () => db.listings.map((listing) => (usesWeeklyHours(listing) ? { ...listing, nextOpening: weeklySlots(listing)[0] || null } : listing)),
+    getListings: async () => {
+      try {
+        const mine = document.body.dataset.mode === "seller";
+        const { listings } = await ccFetch(`/listings${mine ? "?mine=1" : ""}`);
+        return listings.map((listing) =>
+          usesWeeklyHours(listing) ? { ...listing, nextOpening: weeklySlots(listing)[0] || null } : listing
+        );
+      } catch {
+        return db.listings.map((listing) =>
+          usesWeeklyHours(listing) ? { ...listing, nextOpening: weeklySlots(listing)[0] || null } : listing
+        );
+      }
+    },
     /** Open times for a service. `duration` is set when times come from weekly hours, so the picker shows a full calendar. */
     getAvailability: (listingId) => {
       const listing = find(db.listings, listingId, "listing");
       return usesWeeklyHours(listing) ? { duration: durationMinutes(listing), slots: weeklySlots(listing) } : { duration: null, slots: fixedSlots(listing) };
     },
 
-    createListing: (fields) => {
+    createListing: async (fields) => {
       requireAll(fields, ["title", "description"], "Add a title and a description.");
       if (!(Number(fields.price) > 0)) fail("Add a price.");
-      const seller = mySellerProfile();
-      const service = fields.kind === "service";
-      const made = fields.merchandiseType === "new";
-      const digital = fields.condition === "Digital download";
-      const listing = {
-        id: newId("listing"), kind: service ? "service" : "product", category: fields.category, title: fields.title, description: fields.description, price: Number(fields.price),
-        seller: seller.name, initials: seller.initials, sellerId: seller.id, storeId: db.stores.find((store) => store.sellerId === seller.id)?.id,
-        rating: "New", reviews: 0, completed: 0, campus: "SDSU", verified: true, status: fields.draft ? "draft" : "active",
-        accent: service ? "lilac" : made ? "mint" : "butter", emoji: service ? "✨" : made ? "✦" : "📦",
-        ...(service
-          ? { unit: fields.duration || "hour", meeting: "Choose a campus meeting spot", certification: seller.certification || CERTIFICATION_BY_CATEGORY[fields.category] || "provider" }
-          : {
-              merchandiseType: made ? "new" : "resale", unit: "each", condition: fields.condition || (made ? "New" : "Good condition"),
-              quantityAvailable: Math.max(1, Math.floor(Number(fields.quantity)) || 1),
-              availability: digital ? "Instant digital delivery" : "Local pickup", meeting: digital ? "Digital delivery in the app" : "Choose a campus pickup spot"
-            })
-      };
-      db.listings.push(listing);
+      const { listing } = await ccFetch("/listings", { method: "POST", body: fields });
       return listing;
     },
 
     /** `changes` may hold any editable listing field, plus `collection` (the name of the store collection it belongs in). */
-    updateListing: (id, changes) => {
-      const listing = myListing(id);
-      const fields = pick(changes, LISTING_FIELDS);
-      if ("title" in fields && !String(fields.title).trim()) fail("Give the listing a title.");
-      if ("price" in fields && !(Number(fields.price) > 0)) fail("Add a price.");
-      if ("price" in fields) fields.price = Number(fields.price);
-      if ("quantityAvailable" in fields) fields.quantityAvailable = Math.max(0, Math.floor(Number(fields.quantityAvailable)) || 0);
-      if ("status" in fields) delete listing.awayPaused;
-      Object.assign(listing, fields);
-      if (listing.kind === "product") {
-        if (listing.quantityAvailable === 0 && listing.status === "active") listing.status = "soldout";
-        else if (listing.quantityAvailable > 0 && listing.status === "soldout") listing.status = "active";
-      }
-      const store = db.stores.find((entry) => entry.id === listing.storeId);
-      if (store && "collection" in changes) {
-        store.collections.forEach((collection) => { collection.listingIds = collection.listingIds.filter((entry) => entry !== id); });
-        store.collections.find((collection) => collection.name === changes.collection)?.listingIds.push(id);
-      }
+    updateListing: async (id, changes) => {
+      const { listing } = await ccFetch(`/listings/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: changes
+      });
       return listing;
     },
 
-    duplicateListing: (id) => {
-      const { tag, awayPaused, ...original } = myListing(id);
-      const copy = { ...structuredClone(original), id: newId("listing"), title: `${original.title} (copy)`, status: "draft", rating: "New", reviews: 0, completed: 0 };
-      db.listings.push(copy);
-      return copy;
+    duplicateListing: async (id) => {
+      const { listing } = await ccFetch(`/listings/${encodeURIComponent(id)}/duplicate`, {
+        method: "POST",
+        body: {}
+      });
+      return listing;
     },
 
-    deleteListing: (id) => {
-      myListing(id);
-      db.listings = db.listings.filter((listing) => listing.id !== id);
-      db.stores.forEach((store) => store.collections.forEach((collection) => { collection.listingIds = collection.listingIds.filter((entry) => entry !== id); }));
+    deleteListing: async (id) => {
+      await ccFetch(`/listings/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
+
+    uploadListingImage: async (file) => {
+      const response = await fetch(
+        `/api/cc/images?filename=${encodeURIComponent(file.name || "photo.jpg")}`,
+        {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": file.type || "application/octet-stream" },
+          body: file
+        }
+      );
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) fail(payload?.error?.message || "Could not upload that photo.");
+      return payload.image;
     },
 
     /* Boards */
@@ -638,15 +641,23 @@ const api = (() => {
     getSellerSettings: () => db.seller.settings,
 
     /** Turning `awayMode` on pauses every active listing. Turning it off brings those same listings back. */
-    updateSellerSettings: (changes) => {
+    updateSellerSettings: async (changes) => {
       const settings = db.seller.settings;
       const wasAway = settings.awayMode;
       Object.assign(settings, pick(changes, Object.keys(settings)));
-      if (settings.awayMode !== wasAway) {
-        db.listings.filter((listing) => listing.sellerId === db.seller.id).forEach((listing) => {
-          if (settings.awayMode && (listing.status || "active") === "active") Object.assign(listing, { status: "paused", awayPaused: true });
-          else if (!settings.awayMode && listing.awayPaused) Object.assign(listing, { status: "active", awayPaused: undefined });
-        });
+      if ("awayMode" in changes && settings.awayMode !== wasAway) {
+        try {
+          await ccFetch("/listings/away", { method: "POST", body: { away: settings.awayMode } });
+        } catch {
+          // Fall back to the in-memory pause when Sharetribe is not configured.
+          db.listings.filter((listing) => listing.sellerId === db.seller.id).forEach((listing) => {
+            if (settings.awayMode && (listing.status || "active") === "active") {
+              Object.assign(listing, { status: "paused", awayPaused: true });
+            } else if (!settings.awayMode && listing.awayPaused) {
+              Object.assign(listing, { status: "active", awayPaused: undefined });
+            }
+          });
+        }
       }
       return settings;
     },
