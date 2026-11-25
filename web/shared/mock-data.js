@@ -118,45 +118,6 @@ function createMockDb() {
     }
   ];
 
-  const schoolServices = [
-    {
-      id: "sdsu-safe-ride",
-      category: "Help",
-      title: "SDSU Safe Ride",
-      provider: "SDSU Transportation",
-      accent: "coral",
-      emoji: "🚐",
-      hours: "Mon–Fri · 7:00 PM–3:30 AM",
-      description: "Free rides for students, faculty and staff from more than 30 campus locations. Request one in the SDSU Safe app.",
-      website: "https://transportation.sdsu.edu/commuting/saferide",
-      websiteLabel: "Visit website"
-    },
-    {
-      id: "mslc",
-      category: "Learn",
-      title: "Math & Science Learning Center",
-      provider: "Love Library Room 328",
-      accent: "mint",
-      emoji: "📐",
-      hours: "Drop in · no appointment",
-      description: "Free drop-in tutoring and course office hours for math and science. Come during the posted hours.",
-      website: "https://mslc.sdsu.edu/",
-      websiteLabel: "Visit website"
-    },
-    {
-      id: "as-headshots",
-      category: "Create",
-      title: "Free professional headshots",
-      provider: "A.S. Career Advantage",
-      accent: "sky",
-      emoji: "🪪",
-      hours: "Tue & Fri · 8:30–10:30 AM",
-      description: "Free headshots for current SDSU students at The Backdoor Studio. Walk-ins are welcome, and an appointment is recommended.",
-      website: "https://as.sdsu.edu/careeradvantage/",
-      websiteLabel: "Visit website"
-    }
-  ];
-
   const products = [
     {
       id: "desk-lamp", kind: "product", merchandiseType: "resale", category: "Furniture", title: "Vintage desk lamp", seller: "Jordan Lee", initials: "JL", sellerId: "jordan-lee", storeId: "dorm-reset", rating: "4.9", reviews: 8, completed: 10, price: 24, unit: "each", accent: "butter", emoji: "💡", condition: "Good condition", availability: "Pickup near the library", campus: "SDSU", verified: true, quantityAvailable: 2,
@@ -264,16 +225,6 @@ function createMockDb() {
       description: "Slow Hours plays a full set in the Student Union theatre. Buy it from the store and bring the QR code to the door.", meeting: "Student Union theatre", response: "Usually replies in under two hours"
     },
     {
-      id: "ticket-aztecs", kind: "ticket", category: "Events", title: "Aztecs vs. Boise State", host: "Snapdragon Stadium", date: "Sat", time: "7:30 PM", location: "Student section", seller: "Chris Nguyen", initials: "CN", sellerId: "chris-nguyen", storeId: "aztec-thrift", rating: "4.9", reviews: 12, completed: 15, price: 25, unit: "ticket", accent: "coral", emoji: "🏈", availability: "Sat · 7:30 PM", campus: "SDSU", verified: true, quantityAvailable: 40,
-      summary: "Student-section seats for Saturday's game. Digital ticket transfers in the app.",
-      description: "Student-section seats for Saturday's game. Your QR code is the ticket at the gate.", meeting: "Student section", response: "Usually replies within an hour"
-    },
-    {
-      id: "ticket-show", kind: "ticket", category: "Events", title: "Open Air concert", host: "Cal Coast Credit Union Open Air", date: "Fri", time: "8:00 PM", location: "Lawn", seller: "Maya Chen", initials: "MC", sellerId: "maya-chen", storeId: "maya-makes-photo", rating: "4.9", reviews: 18, completed: 28, price: 40, unit: "ticket", accent: "lilac", emoji: "🎤", availability: "Fri · 8:00 PM", campus: "SDSU", verified: true, quantityAvailable: 80,
-      summary: "A Friday lawn ticket. Student price, mobile entry.",
-      description: "A Friday lawn ticket for the Open Air concert. Student price, and the QR code is your mobile entry.", meeting: "Lawn", response: "Usually replies in under an hour"
-    },
-    {
       id: "ticket-formal", kind: "ticket", category: "Events", title: "Org formal guest ticket", host: "Delta Gamma", date: "Sat", time: "6:00 PM", location: "Downtown", seller: "Zoe Rivera", initials: "ZR", sellerId: "zoe-rivera", storeId: "zoe-nail-studio", rating: "4.8", reviews: 26, completed: 34, price: 35, unit: "ticket", accent: "butter", emoji: "✨", availability: "Sat · 6:00 PM", campus: "SDSU", verified: true, quantityAvailable: 12,
       summary: "One extra guest ticket for the spring formal. Includes dinner.",
       description: "One extra guest ticket for the spring formal. Dinner is included, and the QR code gets you in.", meeting: "Downtown", response: "Usually replies in under two hours"
@@ -314,7 +265,7 @@ function createMockDb() {
         { name: "Sessions", listingIds: ["maya-portraits", "maya-mini", "maya-events"] },
         { name: "Prints & presets", listingIds: ["maya-prints", "maya-presets"] },
         { name: "Closet", listingIds: ["maya-sundress", "maya-jeans", "maya-tote"] },
-        { name: "Tickets", listingIds: ["maya-open-studio", "ticket-show"] }
+        { name: "Tickets", listingIds: ["maya-open-studio"] }
       ],
       reviewsSample: [
         { author: "Priya S.", rating: 5, text: "Maya made the session feel easy. The photos looked like me, not a stock photo.", listingId: "maya-portraits" },
@@ -469,8 +420,7 @@ function createMockDb() {
       rating: "4.9", reviews: 17, sales: 21, followers: 205,
       policies: { cancellation: "Cancel any time before pickup.", pickup: "Pickup along the Campanile walk.", hours: "Afternoons" },
       collections: [
-        { name: "Sweats", listingIds: ["vintage-hoodie", "chris-crewneck"] },
-        { name: "Tickets", listingIds: ["ticket-aztecs"] }
+        { name: "Sweats", listingIds: ["vintage-hoodie", "chris-crewneck"] }
       ],
       reviewsSample: [
         { author: "Jay R.", rating: 5, text: "Hoodie is so soft. Chris had it ready right on time.", listingId: "vintage-hoodie" }
@@ -506,63 +456,6 @@ function createMockDb() {
     }
   ];
 
-  const jobs = [
-    { id: "job-arc", title: "Lifeguard", kicker: "Aztec Recreation Center", meta: "Evenings and weekends · On campus", price: "$17.50/hr", accent: "sky", emoji: "🏊", poster: "Sam Ortiz", initials: "SO", summary: "Watch the ARC pool during open swims and intramurals. Current certification required, or ARC will schedule the class.", facts: [["Schedule", "Evenings and weekends"], ["Where", "Aztec Recreation Center"], ["Type", "On-campus job"]] },
-    { id: "job-library", title: "Library desk assistant", kicker: "Love Library", meta: "10–15 hrs/week · Student assistant", price: "$16.75/hr", accent: "lilac", emoji: "📚", poster: "Elena Park", initials: "EP", summary: "Check out materials, answer desk questions, and shelve returns between classes.", facts: [["Schedule", "10–15 hours a week"], ["Where", "Love Library"], ["Type", "Student assistant"]] },
-    { id: "job-research", title: "Research assistant", kicker: "Psychology lab", meta: "Spring semester · Flexible hours", price: "$18/hr", accent: "mint", emoji: "🧪", poster: "Avery Cole", initials: "AC", summary: "Help run study sessions and keep participant notes organized. Psychology coursework is a plus.", facts: [["Schedule", "Flexible, about 8 hours a week"], ["Where", "Life Sciences"], ["Type", "Research"]] },
-    { id: "job-cafe", title: "Opening barista", kicker: "Aztec Cafe", meta: "Weekday mornings · Food service", price: "$16.50/hr", accent: "butter", emoji: "☕", poster: "Chris Nguyen", initials: "CN", summary: "Open the cafe before the first class rush. Training is paid.", facts: [["Schedule", "Weekday mornings"], ["Where", "Student Union"], ["Type", "Campus dining"]] },
-    { id: "job-events", title: "Event staff", kicker: "Associated Students", meta: "Game days and org nights", price: "$16/hr", accent: "coral", emoji: "🎟️", poster: "Jordan Hale", initials: "JH", summary: "Set up, scan tickets, and reset rooms for campus events. Shifts are posted a week ahead.", facts: [["Schedule", "Nights and weekends"], ["Where", "Around campus"], ["Type", "Event staff"]] },
-    { id: "job-note", title: "Note taker", kicker: "Student Disability Services", meta: "One class · Semester long", price: "$200/class", accent: "sky", emoji: "📝", poster: "Taylor Brooks", initials: "TB", summary: "Share clear notes from a class you are already taking. SDS matches you with a student who needs them.", facts: [["Schedule", "Your current class"], ["Where", "Your classroom"], ["Type", "Semester role"]] }
-  ];
-
-  const housing = [
-    { id: "home-college", title: "Private room in a 4-bedroom", kicker: "College Area", meta: "Jan–May · 8 minute walk", price: "$950/mo", accent: "butter", emoji: "🛏️", poster: "Riley Santos", initials: "RS", summary: "Furnished room in a student house. Utilities split four ways. Available when the current roommate studies abroad.", facts: [["Dates", "January through May"], ["Rent", "$950 a month"], ["Place", "College Area, 8 minute walk"]] },
-    { id: "home-studio", title: "Summer studio sublease", kicker: "South Campus Plaza", meta: "May 20–Aug 10 · Furnished", price: "$1,400/mo", accent: "sky", emoji: "🏢", poster: "Alex Kim", initials: "AK", summary: "A furnished studio for the summer, with the gym and a shuttle stop downstairs.", facts: [["Dates", "May 20 through August 10"], ["Rent", "$1,400 a month"], ["Place", "South Campus Plaza"]] },
-    { id: "home-shared", title: "Shared room, spring only", kicker: "University Towers", meta: "Jan–May · One roommate", price: "$720/mo", accent: "mint", emoji: "🪴", poster: "Jordan Ellis", initials: "JE", summary: "One side of a shared double. The roommate is a junior in business and is keeping the lease.", facts: [["Dates", "January through May"], ["Rent", "$720 a month"], ["Place", "University Towers"]] },
-    { id: "home-house", title: "Master bedroom sublease", kicker: "Rolando", meta: "Now–July · Private bath", price: "$1,100/mo", accent: "coral", emoji: "🏠", poster: "Noah Brooks", initials: "NB", summary: "Master bedroom with its own bathroom in a house of four students. Street parking and a short bus ride to campus.", facts: [["Dates", "Now through July"], ["Rent", "$1,100 a month"], ["Place", "Rolando"]] }
-  ];
-
-  const openChores = [
-    { id: "chore-dog", title: "Dog walker", meta: "Today · 3:30 PM · Campanile", price: "$15", amount: "$15", accent: "sky", emoji: "🐕", poster: "Sam Ortiz", initials: "SO", summary: "A 30-minute walk for a small dog. Leash and bags are by the door.", facts: [["When", "Today, 3:30 PM"], ["Where", "Campanile"], ["Pay", "$15"]], status: "open" },
-    { id: "chore-move", title: "Move-out help", meta: "Sat · 10:00 AM · Tenochca", price: "$25/hour", amount: "$25", accent: "butter", emoji: "📦", poster: "Alex Ruiz", initials: "AR", summary: "Need an extra pair of hands for boxes and a mini fridge from Tenochca out to a car.", facts: [["When", "Saturday, 10:00 AM"], ["Where", "Tenochca"], ["Pay", "$25 an hour"]], status: "open" },
-    { id: "chore-laundry", title: "Laundry pickup", meta: "Today · 5:00 PM · Zura", price: "$12/load", amount: "$12", accent: "sky", emoji: "🧺", poster: "Priya Shah", initials: "PS", summary: "One load to wash, dry, and fold. It will be in a bag at the Zura lobby.", facts: [["When", "Today, 5:00 PM"], ["Where", "Zura lobby"], ["Pay", "$12 a load"]], status: "open" },
-    { id: "chore-groceries", title: "Grocery run", meta: "Today · 4:00 PM · Viejas", price: "$8 + receipt", amount: "$8", accent: "mint", emoji: "🛒", poster: "Lena Brooks", initials: "LB", summary: "A short list from the campus market. The receipt is covered, plus $8 for the run.", facts: [["When", "Today, 4:00 PM"], ["Where", "Drop-off at Chapultepec"], ["Pay", "$8 plus the receipt"]], status: "open" },
-    { id: "chore-package", title: "Package drop", meta: "Today · 2:00 PM · Mailroom", price: "$10", amount: "$10", accent: "coral", emoji: "📬", poster: "Elena Park", initials: "EP", summary: "A small box that needs to reach the campus mailroom before it closes.", facts: [["When", "Today, 2:00 PM"], ["Where", "Campus mailroom"], ["Pay", "$10"]], status: "open" },
-    { id: "chore-plants", title: "Plant water", meta: "Fri · 6:00 PM · Maya Hall", price: "$12", amount: "$12", accent: "mint", emoji: "🪴", poster: "Avery Cole", initials: "AC", summary: "Three plants on the windowsill. A key is with the front desk.", facts: [["When", "Friday, 6:00 PM"], ["Where", "Maya Hall"], ["Pay", "$12"]], status: "open" },
-    { id: "chore-notes", title: "Notes pickup", meta: "Tomorrow · 11:00 AM · Library", price: "$8", amount: "$8", accent: "lilac", emoji: "📝", poster: "Jordan Hale", initials: "JH", summary: "A printed study packet at the Love Library hold shelf, name Hale.", facts: [["When", "Tomorrow, 11:00 AM"], ["Where", "Love Library"], ["Pay", "$8"]], status: "open" },
-    { id: "chore-bike", title: "Bike to class", meta: "Mon · 8:15 AM · PS12", price: "$10", amount: "$10", accent: "sky", emoji: "🚲", poster: "Chris Nguyen", initials: "CN", summary: "Roll a locked bike from Parking Structure 12 to the engineering steps.", facts: [["When", "Monday, 8:15 AM"], ["Where", "Parking Structure 12"], ["Pay", "$10"]], status: "open" },
-    { id: "chore-posters", title: "Poster hang", meta: "Thu · 1:00 PM · Union", price: "$15", amount: "$15", accent: "coral", emoji: "📌", poster: "Riley Santos", initials: "RS", summary: "Six club posters for the bulletin strips in the Student Union.", facts: [["When", "Thursday, 1:00 PM"], ["Where", "Student Union"], ["Pay", "$15"]], status: "open" },
-    { id: "chore-trash", title: "Trash run", meta: "Tonight · 9:00 PM · Tenochca", price: "$10", amount: "$10", accent: "butter", emoji: "🗑️", poster: "Noah Brooks", initials: "NB", summary: "Two bags from a third-floor room down to the dumpster.", facts: [["When", "Tonight, 9:00 PM"], ["Where", "Tenochca"], ["Pay", "$10"]], status: "open" },
-    { id: "chore-tidy", title: "Room reset", meta: "Sun · 1:00 PM · Cuicacalli", price: "$20/hour", amount: "$20", accent: "lilac", emoji: "🧹", poster: "Dana Kim", initials: "DK", summary: "Surfaces, floors, and a bag of trash out the door before a Sunday visitor.", facts: [["When", "Sunday, 1:00 PM"], ["Where", "Cuicacalli"], ["Pay", "$20 an hour"]], status: "open" },
-    { id: "chore-desk", title: "Desk carry", meta: "Sat · 12:00 PM · Art North", price: "$20", amount: "$20", accent: "butter", emoji: "🪑", poster: "Harper Diaz", initials: "HD", summary: "A small desk from Art North to a car at the curb. One other person is already helping.", facts: [["When", "Saturday, 12:00 PM"], ["Where", "Art North"], ["Pay", "$20"]], status: "open" }
-  ];
-
-  const apartments = [
-    { id: "apt-plaza", title: "South Campus Plaza", kicker: "On campus", meta: "Trolley stop downstairs · Gym", price: "From $1,650/mo", accent: "sky", emoji: "🏢", summary: "Studios and shared units on the south edge of campus, with a market and the trolley at the door.", facts: [["Where", "South Campus Plaza"], ["Walk", "On campus"], ["Homes", "Studios and shares"]] },
-    { id: "apt-blvd", title: "BLVD63", kicker: "College Area", meta: "El Cajon Blvd · Short walk", price: "From $1,400/mo", accent: "butter", emoji: "🌆", summary: "A College Area building a short walk up the hill, with studios and a few larger floor plans.", facts: [["Where", "El Cajon Boulevard"], ["Walk", "About 12 minutes"], ["Homes", "Studios and one-bedrooms"]] },
-    { id: "apt-granada", title: "The Granada", kicker: "Montezuma Road", meta: "Across from campus", price: "From $1,500/mo", accent: "mint", emoji: "🌿", summary: "Apartments across Montezuma from campus. A crosswalk and you are on the edge of school.", facts: [["Where", "Montezuma Road"], ["Walk", "About 8 minutes"], ["Homes", "Studios and one-bedrooms"]] },
-    { id: "apt-towers", title: "University Towers", kicker: "55th Street", meta: "Walk to class · Furnished options", price: "From $1,200/mo", accent: "lilac", emoji: "🗼", summary: "A tall student building with furnished rooms and shares, close enough to walk between classes.", facts: [["Where", "55th Street"], ["Walk", "About 10 minutes"], ["Homes", "Furnished shares and privates"]] },
-    { id: "apt-unscripted", title: "Unscripted", kicker: "College Area", meta: "Furnished studios", price: "From $1,550/mo", accent: "coral", emoji: "✨", summary: "Furnished studios near campus for a student who wants their own door and a short commute.", facts: [["Where", "College Area"], ["Walk", "About 15 minutes"], ["Homes", "Furnished studios"]] },
-    { id: "apt-fiftysix", title: "Fifty Six East", kicker: "56th Street", meta: "Walk or a short bus", price: "From $1,350/mo", accent: "sky", emoji: "🏠", summary: "Apartments just east of campus. Walk it on a nice day, or catch the bus along the hill.", facts: [["Where", "56th Street"], ["Walk", "About 15 minutes"], ["Homes", "Studios and one-bedrooms"]] }
-  ];
-
-  const agents = [
-    { id: "agent-camila", name: "Camila Reyes", initials: "CR", brokerage: "College Area Homes", focus: "College Area", summary: "Studios and shared houses a short walk from campus.", rating: "4.9", reviews: 18, accent: "coral" },
-    { id: "agent-owen", name: "Owen Blake", initials: "OB", brokerage: "Plaza Residential", focus: "South Campus Plaza", summary: "Furnished units by the trolley, gym, and shuttle stop.", rating: "4.8", reviews: 24, accent: "mint" },
-    { id: "agent-sofia", name: "Sofia Nguyen", initials: "SN", brokerage: "Rolando Homes", focus: "Rolando", summary: "Student houses with street parking and a short bus ride.", rating: "4.9", reviews: 15, accent: "sky" },
-    { id: "agent-malik", name: "Malik Johnson", initials: "MJ", brokerage: "Aztec Lease Co.", focus: "First leases", summary: "Help comparing rent, roommates, and move-in dates.", rating: "4.7", reviews: 21, accent: "butter" },
-    { id: "agent-harper", name: "Harper Diaz", initials: "HD", brokerage: "Campus Key Realty", focus: "Summer subleases", summary: "Short stays and summer takeovers near SDSU.", rating: "4.8", reviews: 12, accent: "lilac" },
-    { id: "agent-quinn", name: "Quinn Alvarez", initials: "QA", brokerage: "Trolley Line Living", focus: "A quick ride away", summary: "Places a bus or trolley ride from class, often for less.", rating: "4.9", reviews: 16, accent: "coral" },
-    { id: "agent-elise", name: "Elise Cho", initials: "EC", brokerage: "Mesa Realty", focus: "High-rise studios", summary: "Studios and shares with a front desk and a gym downstairs.", rating: "4.8", reviews: 19, accent: "sky" }
-  ];
-
-  const ticketPosts = [
-    { id: "tpost-alex", kind: "resell", event: "Boise State", price: "25", name: "Alex Ruiz", initials: "AR", accent: "coral", mine: false, messages: [] },
-    { id: "tpost-priya", kind: "request", event: "the Open Air concert", name: "Priya Shah", initials: "PS", accent: "lilac", mine: false, messages: [] },
-    { id: "tpost-lena", kind: "resell", event: "spring formal", price: "35", name: "Lena Brooks", initials: "LB", accent: "butter", mine: false, messages: [] },
-    { id: "tpost-dana", kind: "request", event: "Comedy night", name: "Dana Kim", initials: "DK", accent: "mint", mine: false, messages: [] }
-  ];
-
   /* ---------- The buyer demo account: Katarina Cedolin ---------- */
 
   const mayaThread = [
@@ -593,8 +486,6 @@ function createMockDb() {
   };
 
   sellers.push({ id: MOCK_BUYER_ID, name: "Katarina Cedolin", initials: "KC", handle: "@katarina", campus: "SDSU · Student", verified: true, bio: "A student seller on Campus Connect.", rating: "New", reviews: 0, completed: 0, response: "soon", accent: "lilac" });
-
-  openChores.unshift({ id: "chore-your-drop", title: "Mailroom drop", meta: "Today · 4:00 PM · Zura", price: "$15", amount: "$15", accent: "coral", emoji: "📬", poster: "Katarina Cedolin", initials: "KC", summary: "A small box from Zura to the campus mailroom before it closes.", facts: [["When", "Today, 4:00 PM"], ["Where", "Zura to the mailroom"], ["Pay", "$15"]], mine: true, status: "requested", offerName: "Priya Shah" });
 
   /* ---------- The seller demo account: Maya Chen ---------- */
 
@@ -744,16 +635,9 @@ function createMockDb() {
 
   return {
     categories,
-    schoolServices,
-    agents,
-    apartments,
     listings: [...services, ...products, ...tickets, ...drafts],
     sellers,
     stores,
-    jobs,
-    housing,
-    chores: openChores,
-    ticketPosts,
     supportCases: [],
     reports: [],
     buyer,

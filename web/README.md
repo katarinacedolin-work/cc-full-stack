@@ -10,11 +10,16 @@ From the repo root, with a `.env` that has Sharetribe and Postgres credentials:
 
 ```bash
 yarn run dev-cc-migrate
+yarn run dev-cc-seed
 yarn run dev-cc
 ```
 
 Then open `http://localhost:4000` for the buyer marketplace or `http://localhost:4000/sell`
 for the Seller Hub.
+
+`dev-cc-seed` loads the school services, apartment buildings and real estate agents listed in
+`server/cc/db/seed/directory.json`. It only adds entries that are not in the database yet. To
+change one that is already there, edit the file and run `yarn run dev-cc-seed --replace`.
 
 ## Architecture
 

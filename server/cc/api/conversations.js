@@ -3,7 +3,8 @@
  *
  * A conversation about a listing or an order is carried by a Sharetribe transaction, so
  * Sharetribe emails the other person when a message arrives. The first message about a listing
- * starts that transaction as an inquiry. Every other conversation lives in Postgres only.
+ * starts that transaction as an inquiry. Every other conversation, with a seller or about a
+ * board post, lives in Postgres only.
  */
 
 const { types } = require('sharetribe-flex-sdk');
@@ -17,11 +18,16 @@ const { deliver } = require('../messaging/deliver');
 const { toConversation } = require('../messaging/mapConversation');
 const { threadFromTransaction } = require('../messaging/fromTransaction');
 const notifications = require('../notifications/store');
+const boards = require('../boards/store');
+const { contextTitleOf } = require('../boards/mapPost');
 const { requireUser, requireApprovedUser } = require('./requireUser');
 
 const { UUID } = types;
 
 const MAX_MESSAGE_LENGTH = 2000;
+
+// The kind of conversation each kind of board post starts.
+const THREAD_KIND = { job: 'job', housing: 'housing', ticket: 'ticket-post' };
 
 // Fast enough for a real chat, slow enough that a script can't flood someone's inbox.
 const sendLimiter = createRateLimiter({ windowMs: 60 * 1000, max: 30 });
@@ -145,22 +151,40 @@ const openDirect = async ({ sdk, user, userId, sellerId }) => {
   );
 };
 
+// A conversation about a post is between its author and the student who answered it.
+const openForPost = async ({ user, userId, postId }) => {
+  const post = await boards.findOpen(postId);
+  if (!post) throw httpError(404, 'post-not-found', 'That post is no longer on the board.');
+  if (post.author_id === userId) throw httpError(400, 'own-post', 'This is your own post.');
+  return store.create({
+    kind: THREAD_KIND[post.kind],
+    contextId: String(post.id),
+    contextTitle: contextTitleOf(post),
+    starterId: userId,
+    starterName: displayNameOf(user),
+    ownerId: post.author_id,
+    ownerName: post.author_name,
+  });
+};
+
 /**
  * POST /api/cc/conversations
- * Body: { orderId } | { listingId } | { sellerId }
- * Finds the conversation about that order, that listing, or with that seller, and starts one
- * when there is none. Nothing reaches the other person until a message is sent.
+ * Body: { orderId } | { listingId } | { sellerId } | { postId }
+ * Finds the conversation about that order, that listing or that board post, or with that
+ * seller, and starts one when there is none. Nothing reaches the other person until a message
+ * is sent.
  */
 exports.open = async (req, res) => {
   const { sdk, user, userId } = await requireApprovedUser(req, res);
   if (!openLimiter.check(userId).ok) {
     throw httpError(429, 'slow-down', 'That was a lot at once. Wait a moment and try again.');
   }
-  const { orderId, listingId, sellerId } = req.body || {};
+  const { orderId, listingId, sellerId, postId } = req.body || {};
 
   let thread;
   if (orderId) thread = await openForOrder({ sdk, orderId });
   else if (listingId) thread = await openForListing({ sdk, user, userId, listingId });
+  else if (postId) thread = await openForPost({ user, userId, postId });
   else if (sellerId) thread = await openDirect({ sdk, user, userId, sellerId });
   else throw httpError(400, 'nothing-to-open', 'Pick who to message first.');
   if (!thread) throw notFound();

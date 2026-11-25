@@ -230,6 +230,7 @@
     "dev-cc": "cross-env NODE_ENV=development PORT=4000 REACT_APP_MARKETPLACE_ROOT_URL=http://localhost:4000 nodemon --watch server server/cc/web.js",
     "dev-cc-worker": "cross-env NODE_ENV=development nodemon --watch server server/cc/worker.js",
     "dev-cc-migrate": "cross-env NODE_ENV=development node server/cc/db/migrate.js",
+    "dev-cc-seed": "cross-env NODE_ENV=development node server/cc/db/seedDirectory.js",
     "test-server": "jest --roots ./server --testMatch='**/server/**/*.test.js' --testEnvironment=node",
     "heroku-postbuild": "yarn run build",
     "postinstall": "patch-package",

@@ -14,6 +14,9 @@ const ACCOUNT_SETTING_LABELS = { notifyMessages: "Message notifications", notify
 /** The buyer views that redraw when a message, a notification or an order changes on its own. */
 const BUYER_LIVE_VIEWS = ["inbox", "you", "order"];
 
+/** Where the posts of each board are kept in `data`. */
+const BOARD_DATA = { job: "jobs", housing: "housing", ticket: "ticketPosts" };
+
 /** Opens a listing page. A service also needs its open times, which are fetched first. */
 async function openListing(id, detailReturn = null) {
   closeModal();
@@ -24,12 +27,6 @@ async function openListing(id, detailReturn = null) {
 function openStore(id, storeReturn = null) {
   closeModal();
   setView("store", { selectedStoreId: id, storeReturn, ...STORE_PAGE_DEFAULTS });
-}
-
-/** Opens the Chore Board, or one chore on it, remembering which page to go back to. */
-function openChoreBoard(choreId = null) {
-  const boardReturn = ["stores", "book", "you", "home"].includes(state.view) ? state.view : state.boardReturn || "book";
-  setView("chore-board", { boardReturn, selectedChoreId: choreId, choreFormOpen: false });
 }
 
 /** Finds or starts a conversation (see api.openConversation) and shows it in the Inbox. */
@@ -88,10 +85,9 @@ Object.assign(ACTIONS, {
 
   /* Listings, booking and checkout */
 
-  "open-listing": (target) => openListing(target.dataset.id, state.view === "store" ? state.selectedStoreId : state.view === "chore-board" ? "chore-board" : state.view === "listing" ? state.detailReturn : null),
+  "open-listing": (target) => openListing(target.dataset.id, state.view === "store" ? state.selectedStoreId : state.view === "listing" ? state.detailReturn : null),
   "back-from-detail": () => {
     const listing = getListing(state.selectedListingId);
-    if (state.detailReturn === "chore-board" || (listing && isChoreListing(listing))) return setView("chore-board", { detailReturn: null });
     if (getStore(state.detailReturn)) return setView("store", { selectedStoreId: state.detailReturn, detailReturn: null });
     return setView(listing?.kind === "ticket" ? "tickets" : listing?.kind === "product" ? "shop" : "book");
   },
@@ -198,8 +194,8 @@ Object.assign(ACTIONS, {
 
   "message-seller": (target) => openConversation({ sellerId: target.dataset.seller, listingId: target.dataset.listing, orderId: target.dataset.order }),
   "message-store": (target) => openConversation({ sellerId: getStore(target.dataset.id).sellerId }),
-  "message-agent": (target) => openConversation({ agentId: target.dataset.id }),
-  "message-board-item": (target) => openConversation(target.dataset.kind === "job" ? { jobId: target.dataset.id } : { housingId: target.dataset.id }),
+  /* A job, a place or a ticket post. The conversation is private, between you and whoever posted it. */
+  "message-board-item": (target) => openConversation({ postId: target.dataset.id }),
   "select-conversation": update((target) => ({ selectedConversationId: target.dataset.id })),
 
   /* Job Board and Housing */
@@ -211,38 +207,18 @@ Object.assign(ACTIONS, {
   "open-agent": (target) => setView("housing", { selectedAgentId: target.dataset.id, selectedHousingId: null, selectedApartmentId: null, housingFormOpen: false }),
   "open-apartment": (target) => setView("housing", { selectedApartmentId: target.dataset.id, selectedHousingId: null, selectedAgentId: null, housingFormOpen: false }),
   "close-board-item": update(() => ({ selectedJobId: null, selectedHousingId: null, selectedAgentId: null, selectedApartmentId: null })),
+  /* Takes down one of your own posts: a job, a place or a ticket post. */
+  "remove-board-post": async (target) => {
+    await api.removeBoardPost(target.dataset.id);
+    Object.assign(state, { selectedJobId: null, selectedHousingId: null });
+    await refresh(BOARD_DATA[target.dataset.kind]);
+    showToast("Your post is off the board.");
+  },
 
   /* Tickets */
 
-  "open-ticket-post": update((target) => ({ ticketDmPostId: null, ticketPostKind: state.ticketPostKind === target.dataset.kind ? null : target.dataset.kind })),
+  "open-ticket-post": update((target) => ({ ticketPostKind: state.ticketPostKind === target.dataset.kind ? null : target.dataset.kind })),
   "close-ticket-post": update(() => ({ ticketPostKind: null })),
-  "open-ticket-dm": update((target) => ({ ticketPostKind: null, ticketDmPostId: target.dataset.id })),
-  "close-ticket-dm": update(() => ({ ticketDmPostId: null })),
-
-  /* Chore Board */
-
-  "open-chore-board": () => openChoreBoard(),
-  "open-chore": (target) => openChoreBoard(target.dataset.id),
-  "close-chore": update(() => ({ selectedChoreId: null })),
-  "toggle-chore-form": update(() => ({ choreFormOpen: !state.choreFormOpen })),
-  "offer-chore": async (target) => {
-    const chore = await api.offerOnChore(target.dataset.id);
-    await refresh("chores", "conversations");
-    showToast(`Offer sent to ${firstName(chore.poster)}. They approve before anyone is paid.`);
-  },
-  "approve-chore": async (target) => {
-    await api.approveChore(target.dataset.id);
-    await load("chores");
-    setView("chore-pay", { selectedChoreId: target.dataset.id });
-  },
-  "open-chore-pay": (target) => setView("chore-pay", { selectedChoreId: target.dataset.id }),
-  "back-from-chore-pay": () => setView("chore-board"),
-  "confirm-chore-pay": async (target) => {
-    const order = await api.payForChore(target.dataset.id);
-    await load("chores", "orders");
-    setView("order", { selectedOrderId: order.id });
-    showToast(`You paid ${firstName(order.payee)} through Campus Connect.`);
-  },
 
   /* Settings */
 
@@ -288,11 +264,6 @@ Object.assign(FORMS, {
     state.selectedConversationId = conversation.id;
     await refresh("conversations");
   },
-  "send-ticket-dm": async ({ message }) => {
-    await api.sendTicketMessage(state.ticketDmPostId, message);
-    await refresh("ticketPosts");
-  },
-
   "post-job": async (fields) => {
     await api.postJob(fields);
     state.jobFormOpen = false;
@@ -304,12 +275,6 @@ Object.assign(FORMS, {
     state.housingFormOpen = false;
     await refresh("housing");
     showToast("Your place is on the board.");
-  },
-  "post-chore": async (fields) => {
-    await api.postChore(fields);
-    state.choreFormOpen = false;
-    await refresh("chores");
-    showToast("Your chore is on the board.");
   },
   "post-ticket": async (fields, form) => {
     await api.postTicket({ ...fields, kind: form.dataset.kind });
@@ -334,11 +299,8 @@ Object.assign(FORMS, {
     if (order?.kind === "product") {
       await api.reportOrderProblem(form.dataset.id, fields);
     } else {
-      // Services and tickets have no dispute transition; file a support case until the reports table lands.
-      await api.createSupportCase({
-        topic: `Order problem · ${fields.reason}`,
-        message: `Order ${form.dataset.id}: ${fields.message}`
-      });
+      /* Services and tickets have no dispute step in Sharetribe, so the team hears about these directly. */
+      await api.createSupportCase({ topic: `Order problem · ${fields.reason}`, message: fields.message, orderId: form.dataset.id });
     }
     closeModal();
     await refresh("orders", "notifications");
@@ -392,7 +354,6 @@ const DEEP_LINKS = {
   housing: (id) => setView("housing", { selectedHousingId: id }),
   agent: (id) => setView("housing", { selectedAgentId: id }),
   apartment: (id) => setView("housing", { selectedApartmentId: id }),
-  chore: (id) => openChoreBoard(id),
   "school-service": (id) => setView("school-service", { selectedSchoolServiceId: id })
 };
 
@@ -418,16 +379,9 @@ if (!IS_SELLER) {
 
   api.subscribe((event) => run(async () => {
     /* A new message, a notification, or a seller acting on one of your orders. */
-    if (event.type === "changed") {
-      await load("conversations", "notifications", "orders");
-      return showChanges(BUYER_LIVE_VIEWS);
-    }
-    /* The poster of a chore you offered to take approves and pays on their own time. */
-    if (event.type !== "chore-paid") return;
-    await load("chores", "orders", "conversations");
-    showToast(`${firstName(event.poster)} approved you and paid through Campus Connect.`);
-    if (state.view === "chore-board" && state.selectedChoreId === event.choreId) setView("order", { selectedOrderId: event.orderId });
-    else render();
+    if (event.type !== "changed") return;
+    await load("conversations", "notifications", "orders");
+    showChanges(BUYER_LIVE_VIEWS);
   }));
 
   /* Ctrl or ⌘ K jumps to search. */
