@@ -2,6 +2,24 @@
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 
+/* Cover colors styled in the Campus Connect CSS. Keep this list in step with ACCENTS in server/cc/listings/mapListing.js. */
+const ACCENT_COLORS = ["coral", "lilac", "butter", "sky", "mint", "cobalt"];
+
+/** An accent that is safe to put in a class attribute. Unknown values use `fallback`. */
+const accentClass = (value, fallback = "butter") => (ACCENT_COLORS.includes(value) ? value : ACCENT_COLORS.includes(fallback) ? fallback : "butter");
+
+/** A cover emoji safe to insert as HTML. Same rule as server emojiOf: symbols only. */
+const emojiText = (value) => {
+  const text = String(value ?? "").trim();
+  if (!text || text.length > 16) return "";
+  for (const char of text) {
+    if (char.codePointAt(0) < 0x80) return "";
+  }
+  return text;
+};
+
+const emojiHtml = (value, fallback = "✦") => escapeHtml(emojiText(value) || emojiText(fallback) || "✦");
+
 /** A listing price: "$24.00", or "Free" when it costs nothing. */
 const money = (amount) => (Number(amount) === 0 ? "Free" : `$${Number(amount).toFixed(2)}`);
 

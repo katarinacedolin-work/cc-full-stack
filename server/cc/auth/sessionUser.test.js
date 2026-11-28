@@ -35,7 +35,14 @@ describe('toSession', () => {
       isAdmin: false,
       termsAcceptedAt: '2026-01-01T00:00:00.000Z',
       termsVersion: '2026-01',
+      awayMode: false,
     });
+  });
+
+  it('keeps away mode from the profile', () => {
+    const signedIn = user();
+    signedIn.attributes.profile.privateData.awayMode = true;
+    expect(toSession(signedIn).awayMode).toBe(true);
   });
 
   it('marks pending-approval users as not approved', () => {

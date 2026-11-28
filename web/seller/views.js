@@ -55,11 +55,11 @@ function statusPill(status, label) {
 
 function buyerAvatar(person) {
   const personId = person.buyer || person.name || person.id;
-  return personMark("span", `mini-avatar buyer-avatar ${person.accent || "lilac"}`, person.initials, personId);
+  return personMark("span", `mini-avatar buyer-avatar ${accentClass(person.accent, "lilac")}`, person.initials, personId);
 }
 
 function listingThumb(listing) {
-  return `<span class="activity-thumb ${listing?.accent || "lilac"}">${listing?.emoji || "✦"}</span>`;
+  return `<span class="activity-thumb ${accentClass(listing?.accent, "lilac")}">${emojiHtml(listing?.emoji, "✦")}</span>`;
 }
 
 function deltaHtml(delta) {
@@ -90,14 +90,13 @@ function sellerPreviewBanner() {
   return `<div class="seller-preview-banner"><span>${icon("eye")} You're previewing what buyers see. Buyer actions are disabled here.</span><button type="button" class="text-button" data-action="seller-exit-preview">${icon("chevron-left")} Back to Seller Hub</button></div>`;
 }
 
-function premiumBanner(title, body, cta) {
-  if (data.sellerSettings.premium) return `<section class="sell-hero seller-premium"><div class="eyebrow">Premium</div><h2>Premium is on.</h2><p>${body}</p><button class="primary-button" data-action="seller-premium">Manage Premium ${icon("arrow")}</button></section>`;
-  return `<section class="sell-hero seller-premium"><div class="eyebrow">Premium</div><h2>${title}</h2><p>${body}</p><button class="primary-button" data-action="seller-premium">${cta} ${icon("arrow")}</button></section>`;
+/** Premium is hidden in v1. */
+function premiumBanner() {
+  return "";
 }
 
 function openPremiumModal() {
-  const on = data.sellerSettings.premium;
-  renderModal(`<div class="eyebrow">Premium</div><h2>${on ? "Premium is on." : "Turn a good profile into a full storefront."}</h2><p class="muted">Premium adds featured placement, extra profile sections, a badge buyers can see before they message you and a clearer view of who is looking at your listings.</p><div class="trust-note">Premium is a demo. Nothing is charged.</div><div class="modal-actions"><button class="ghost-button" data-action="close-modal">${on ? "Close" : "Not now"}</button><button class="${on ? "danger-button" : "primary-button"}" data-action="seller-toggle-premium">${on ? "Turn off Premium" : "Turn on Premium"}</button></div>`);
+  closeModal();
 }
 
 /* ---------- Dashboard ---------- */
@@ -422,7 +421,7 @@ function sellerOrderView() {
   return `${sellerHeader({ eyebrow: `${order.kind === "service" ? "Booking" : "Order"} · CC-${order.id.slice(-4).toUpperCase()}`, title: escapeHtml(orderListingTitle(order)), sub: `${escapeHtml(order.buyer)} · placed ${escapeHtml(timeAgo(order.placedAt))}`, back: { action: "seller-back-to-orders", label: "Back to orders" }, actions: `<button class="ghost-button" data-action="seller-message-buyer" data-id="${order.id}">${icon("chat")} Message buyer</button>` })}
     <div class="order-layout">
       <section class="order-panel">
-        <div class="order-main-top"><div class="summary-visual" style="border:0;padding:0">${listing ? cardThumb(listing.title, listing.accent, listing.emoji) : ""}<div><strong>${escapeHtml(orderListingTitle(order))}</strong><div class="small muted">${escapeHtml(getStore(listing?.storeId)?.name || "")}</div></div></div>${statusPill(order.status, orderStatusLabel(order))}</div>
+        <div class="order-main-top"><div class="summary-visual" style="border:0;padding:0">${listing ? cardThumb(listing.title, listing.accent, listing.emoji) : ""}<div><strong>${escapeHtml(orderListingTitle(order))}</strong><div class="small muted">${escapeHtml(storeForListing(listing)?.name || "")}</div></div></div>${statusPill(order.status, orderStatusLabel(order))}</div>
         ${orderTimeline(order)}
         <div class="order-detail-card seller-order-details">
           <div class="order-detail-row"><span>${order.kind === "service" ? "When" : "Pickup"}</span><strong>${escapeHtml(orderWhen(order))}</strong></div>
@@ -585,7 +584,7 @@ function sellerAnalyticsView() {
       <section class="seller-card"><div class="seller-card-header"><div><h2>From view to order</h2><p class="muted small">Where buyers drop off</p></div></div><div class="funnel">${funnel.map((step, index) => `<div class="funnel-row"><div class="funnel-copy"><strong>${step.label}</strong><span class="muted small">${formatNumber(step.value)}${index ? ` · ${((step.value / Math.max(funnel[0].value, 1)) * 100).toFixed(1)}%` : ""}</span></div><div class="funnel-track"><span class="funnel-bar" style="width:${Math.max(3, (step.value / Math.max(funnel[0].value, 1)) * 100)}%"></span></div></div>`).join("")}</div></section>
       <section class="seller-card"><div class="seller-card-header"><div><h2>Where buyers come from</h2><p class="muted small">Share of listing views</p></div></div><div class="source-list">${data.analytics.sources.map((source, index) => `<div class="source-row"><span class="source-label"><span class="source-dot" style="background:${SOURCE_COLORS[index % SOURCE_COLORS.length]}"></span>${escapeHtml(source.label)}</span><span class="source-track"><span style="width:${source.share}%;background:${SOURCE_COLORS[index % SOURCE_COLORS.length]}"></span></span><strong>${source.share}%</strong></div>`).join("")}</div></section>
     </div>
-    ${premiumBanner("Turn a good profile into a full storefront.", "Premium adds featured placement, extra profile sections and a clearer view of who is looking at your listings.", "See what Premium includes")}
+    ${premiumBanner()}
     <section class="seller-card analytics-wide"><div class="seller-card-header"><div><h2>Top listings</h2><p class="muted small">All-time performance</p><button class="text-button" data-view="seller-listings">Manage listings ${icon("arrow")}</button></div></div>
       <div class="seller-table top-table"><div class="seller-table-head"><span>Listing</span><span>Views</span><span>Saves</span><span>Orders</span><span>Conversion</span></div>${listings.map((listing) => { const stats = statsFor(listing.id); return `<div class="seller-row"><div class="cell cell-main"><button type="button" class="row-title" data-action="seller-edit-listing" data-id="${listing.id}">${listingThumb(listing)}<span><span class="activity-title">${escapeHtml(listing.title)}</span><span class="activity-sub">${money(listing.price)} · ${LISTING_STATUS_LABELS[listingStatus(listing)]}</span></span></button></div><div class="cell" data-label="Views"><strong>${formatNumber(stats.views)}</strong></div><div class="cell" data-label="Saves"><strong>${formatNumber(stats.saves)}</strong></div><div class="cell" data-label="Orders"><strong>${formatNumber(stats.orders)}</strong></div><div class="cell" data-label="Conversion"><strong>${stats.views ? ((stats.orders / stats.views) * 100).toFixed(1) : "0.0"}%</strong></div></div>`; }).join("")}</div>
     </section>
@@ -643,7 +642,7 @@ function sellerNotificationsView() {
   const unread = data.notifications.filter((notification) => notification.unread).length;
   return `${sellerHeader({ eyebrow: "Seller Hub", title: "Notifications", sub: unread ? `${unread} unread. Tap one to jump straight to it.` : "You're all caught up.", actions: `<button class="ghost-button" data-action="seller-open-notification-settings">${icon("settings")} Settings</button><button class="primary-button" data-action="mark-all-notifications-read">${icon("check")} Mark all read</button>` })}
     <div class="seller-chip-row" style="margin-bottom:16px">${chips}</div>
-    ${list.length ? `<div class="seller-notification-list">${list.map((notification) => `<button type="button" class="seller-notification ${notification.unread ? "unread" : ""}" data-action="open-notification" data-id="${notification.id}"><span class="activity-thumb ${notification.accent}">${notification.emoji}</span><span class="seller-notification-copy"><span class="notification-popover-top"><strong>${escapeHtml(notification.title)}</strong><span class="muted small">${escapeHtml(timeAgo(notification.at))}</span></span><span class="muted small">${escapeHtml(notification.body)}</span></span>${notification.unread ? `<span class="unread-dot" aria-label="Unread"></span>` : ""}${icon("chevron-right")}</button>`).join("")}</div>`
+    ${list.length ? `<div class="seller-notification-list">${list.map((notification) => `<button type="button" class="seller-notification ${notification.unread ? "unread" : ""}" data-action="open-notification" data-id="${notification.id}"><span class="activity-thumb ${accentClass(notification.accent)}">${emojiHtml(notification.emoji)}</span><span class="seller-notification-copy"><span class="notification-popover-top"><strong>${escapeHtml(notification.title)}</strong><span class="muted small">${escapeHtml(timeAgo(notification.at))}</span></span><span class="muted small">${escapeHtml(notification.body)}</span></span>${notification.unread ? `<span class="unread-dot" aria-label="Unread"></span>` : ""}${icon("chevron-right")}</button>`).join("")}</div>`
       : `<div class="empty-state"><div class="empty-shape">🔔</div><h3>Nothing here yet.</h3><p class="muted">Try another filter.</p></div>`}`;
 }
 
@@ -702,7 +701,6 @@ function sellerAvailabilitySettings() {
     : `<button class="ghost-button compact" data-action="seller-connect-google">${icon("calendar")} Connect</button>`;
   return `<div class="settings-group"><h2>Availability</h2><p class="muted small">Control when buyers can book and buy.</p>
     ${sellerSettingsRow("awayMode", "Away mode", "Pause every active listing at once, for finals or a trip. Turning it off restores them.")}
-    ${sellerSettingsRow("instantBook", "Instant booking", "Let buyers book open slots without waiting for you to accept.")}
     <div class="settings-row"><div class="settings-row-copy"><strong>Google Calendar</strong><p class="muted small">${calendarCopy}</p></div>${calendarAction}</div>
     <div class="settings-row"><div class="settings-row-copy"><strong>Weekly hours</strong><p class="muted small">${slotDetail}</p></div><button class="ghost-button compact" data-view="seller-availability">${icon("calendar")} Manage</button></div></div>`;
 }
@@ -793,10 +791,10 @@ function sellerAvailabilityView() {
 /* ---------- Store ---------- */
 
 function storeManageCard(store) {
-  const listings = everyListing().filter((listing) => listing.storeId === store.id);
+  const listings = everyListing().filter((listing) => listingOnStore(listing, store));
   const active = listings.filter((listing) => listingStatus(listing) === "active").length;
   return `<article class="store-manage-card">
-    <div class="${storeBannerClass(store)}">${storeBannerContents(store, `<span class="store-card-previews" aria-hidden="true">${listings.slice(0, 3).map((listing) => `<span>${listing.emoji}</span>`).join("")}</span>`)}</div>
+    <div class="${storeBannerClass(store)}">${storeBannerContents(store, `<span class="store-card-previews" aria-hidden="true">${listings.slice(0, 3).map((listing) => `<span>${emojiHtml(listing.emoji)}</span>`).join("")}</span>`)}</div>
     ${personMark("span", "store-card-logo", getSeller(store.sellerId).initials, store.sellerId, `aria-hidden="true"`)}
     <div class="store-card-body">
       <span class="store-card-name">${escapeHtml(store.name)}</span>
@@ -827,9 +825,9 @@ function sellerStoreEditView() {
   const store = getStore(state.seller.editStoreId);
   const draft = state.seller.draft;
   if (!store || !draft) return sellerStoresView();
-  const storeItems = everyListing().filter((listing) => listing.storeId === store.id);
+  const storeItems = everyListing().filter((listing) => listingOnStore(listing, store));
   const swatches = ACCENTS.map((accent) => `<button type="button" class="swatch ${accent} ${draft.accent === accent ? "active" : ""}" data-action="seller-set-draft-accent" data-accent="${accent}" aria-label="${accent} theme"></button>`).join("");
-  const collections = draft.collections.map((collection, index) => `<div class="collection-block"><div class="collection-head"><input aria-label="Collection name" data-collection-name="${index}" value="${escapeHtml(collection.name)}" /><button type="button" class="icon-button danger" data-action="seller-remove-collection" data-index="${index}" aria-label="Remove ${escapeHtml(collection.name)}">${icon("trash")}</button></div><div class="collection-items">${storeItems.map((listing) => `<label class="collection-item"><input type="checkbox" data-collection-index="${index}" value="${listing.id}" ${collection.listingIds.includes(listing.id) ? "checked" : ""} /> <span>${listing.emoji} ${escapeHtml(listing.title)}</span></label>`).join("") || `<span class="muted small">Add listings to this store first.</span>`}</div></div>`).join("");
+  const collections = draft.collections.map((collection, index) => `<div class="collection-block"><div class="collection-head"><input aria-label="Collection name" data-collection-name="${index}" value="${escapeHtml(collection.name)}" /><button type="button" class="icon-button danger" data-action="seller-remove-collection" data-index="${index}" aria-label="Remove ${escapeHtml(collection.name)}">${icon("trash")}</button></div><div class="collection-items">${storeItems.map((listing) => `<label class="collection-item"><input type="checkbox" data-collection-index="${index}" value="${listing.id}" ${collection.listingIds.includes(listing.id) ? "checked" : ""} /> <span>${emojiHtml(listing.emoji)} ${escapeHtml(listing.title)}</span></label>`).join("") || `<span class="muted small">Add listings to this store first.</span>`}</div></div>`).join("");
   return `${sellerHeader({ eyebrow: "Edit store", title: escapeHtml(store.name), sub: plural(storeItems.length, "listing"), back: { view: "seller-stores", label: "Back to your store" }, actions: `<button class="ghost-button" data-action="seller-preview-store" data-id="${store.id}">${icon("eye")} Preview store</button>` })}
     <div class="editor-layout">
       <form class="form-card editor-form" data-form="seller-save-store">
@@ -874,7 +872,7 @@ function sellerReviewsView() {
     .map((chip) => `<button type="button" class="filter-button ${filter === chip.id ? "active" : ""}" data-action="seller-set-reviews-filter" data-filter="${chip.id}">${chip.label}</button>`).join("");
   const rows = list.map((review) => {
     const listing = getListing(review.listingId);
-    return `<article class="store-review"><div class="store-review-top"><div><strong>${escapeHtml(review.author)}</strong> <span class="muted small">· ${escapeHtml(timeAgo(review.at))}</span></div><span class="store-review-stars" aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</span></div><p>“${escapeHtml(review.text)}”</p>${listing ? `<span class="store-review-listing">${listing.emoji} ${escapeHtml(listing.title)}</span>` : ""}
+    return `<article class="store-review"><div class="store-review-top"><div><strong>${escapeHtml(review.author)}</strong> <span class="muted small">· ${escapeHtml(timeAgo(review.at))}</span></div><span class="store-review-stars" aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</span></div><p>“${escapeHtml(review.text)}”</p>${listing ? `<span class="store-review-listing">${emojiHtml(listing.emoji)} ${escapeHtml(listing.title)}</span>` : ""}
       ${review.reply ? `<div class="review-reply"><span class="small"><strong>Your reply</strong></span><p>${escapeHtml(review.reply)}</p></div>` : `<form class="review-reply-form" data-form="seller-review-reply" data-id="${review.id}"><textarea name="reply" rows="2" required placeholder="Thank ${escapeHtml(firstName(review.author))} or add context…" aria-label="Reply to ${escapeHtml(review.author)}"></textarea><button class="primary-button" type="submit">Reply</button></form>`}</article>`;
   }).join("");
   return `${sellerHeader({ eyebrow: "Seller Hub", title: "Reviews", sub: "Every review comes from a completed booking or pickup. Replies are public.", back: { view: "seller-profile", label: "Back to profile" } })}

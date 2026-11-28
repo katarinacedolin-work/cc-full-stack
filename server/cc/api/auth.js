@@ -11,6 +11,7 @@ const {
 } = require('../../api-util/cookieOptions');
 const { httpError } = require('../auth/httpError');
 const { createRateLimiter } = require('../auth/rateLimit');
+const { emailForGoogleSignup } = require('../auth/googleSignupEmail');
 const { isSdsuEmail, normalizeEmail } = require('../auth/sdsu');
 const { toSession } = require('../auth/sessionUser');
 
@@ -66,6 +67,7 @@ const loadCurrentUser = async (req, res) => {
 const hasRealSharetribeKeys = () =>
   CLIENT_ID &&
   CLIENT_ID !== 'change-me' &&
+  process.env.SHARETRIBE_SDK_CLIENT_SECRET &&
   process.env.SHARETRIBE_SDK_CLIENT_SECRET !== 'change-me';
 
 /**
@@ -299,6 +301,8 @@ exports.resendVerification = async (req, res) => {
  * POST /api/cc/signup-with-google
  * Body: { firstName, lastName, acceptTerms: true }
  * Uses the pending Google cookies set by /api/auth/google/callback.
+ * The marketplace email is the address in the verified Google ID token.
+ * `st-authinfo` is not httpOnly, so its email is not the mailbox that gets created.
  * Terms are recorded only after the caller agrees, and the timestamp comes from the server.
  */
 exports.signupWithGoogle = async (req, res) => {
@@ -308,16 +312,13 @@ exports.signupWithGoogle = async (req, res) => {
   if (!idpToken || authInfo?.idpId !== 'google') {
     throw httpError(400, 'google-session-expired', 'Start again with Continue with Google.');
   }
-  if (!isSdsuEmail(authInfo.email)) {
-    throw httpError(
-      400,
-      'sdsu-email-required',
-      'Use a Google account registered with your @sdsu.edu email.'
-    );
-  }
   if (!GOOGLE_CLIENT_ID) {
     throw httpError(500, 'google-not-configured', 'Google sign-in is not configured.');
   }
+
+  // Sharetribe copies the token's verified-email flag only when this email
+  // matches the token. A different address would still bind the Google subject.
+  const email = await emailForGoogleSignup(idpToken, GOOGLE_CLIENT_ID, authInfo.email);
 
   const firstName = String(req.body?.firstName || authInfo.firstName || '').trim();
   const lastName = String(req.body?.lastName || authInfo.lastName || '').trim();
@@ -353,7 +354,7 @@ exports.signupWithGoogle = async (req, res) => {
       idpId: 'google',
       idpClientId: GOOGLE_CLIENT_ID,
       idpToken,
-      email: normalizeEmail(authInfo.email),
+      email,
       firstName,
       lastName,
       privateData,

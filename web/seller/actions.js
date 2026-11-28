@@ -8,11 +8,7 @@ const SELLER_SETTING_LABELS = {
   notifyRequests: "Order notifications",
   notifyMessages: "Message notifications",
   notifyReviews: "Review notifications",
-  notifyPayouts: "Payout notifications",
-  notifyDigest: "Weekly summary",
-  awayMode: "Away mode",
-  instantBook: "Instant book",
-  premium: "Premium"
+  awayMode: "Away mode"
 };
 
 const sellerUpdate = (changes) => (target) => {
@@ -378,14 +374,8 @@ Object.assign(ACTIONS, {
     }
   },
 
-  "seller-premium": () => openPremiumModal(),
-
-  "seller-toggle-premium": async () => {
-    await api.updateSellerSettings({ premium: !data.sellerSettings.premium });
-    await refresh("sellerSettings", "listings");
-    closeModal();
-    showToast(data.sellerSettings.premium ? "Premium is on for this demo." : "Premium turned off.");
-  },
+  "seller-premium": () => {},
+  "seller-toggle-premium": () => closeModal(),
 
   "seller-add-phone": () => openPhoneModal(),
 

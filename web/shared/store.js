@@ -85,7 +85,6 @@ const NAVIGATION_DEFAULTS = {
   query: "",
   category: "All",
   sort: "recommended",
-  trust: "any",
   storesFilter: "All",
   storesQuery: "",
   jobQuery: "",
@@ -165,7 +164,12 @@ const state = {
 /* ---------- Selectors: read-only questions about `data` ---------- */
 
 const myId = () => data.session.userId;
-const listingStatus = (listing) => listing?.status || "active";
+
+/** Sharetribe pause and away mode are stored as `closed`. Tabs, labels, and Turn on all read `paused`. */
+const listingStatus = (listing) => {
+  const status = listing?.status || "active";
+  return status === "closed" ? "paused" : status;
+};
 
 /** Every listing, including the signed-in seller's drafts and paused ones. */
 const everyListing = () => data.listings;
@@ -175,7 +179,22 @@ const getListing = (id) => data.listings.find((listing) => listing.id === id);
 const getSeller = (id) => data.sellers.find((seller) => seller.id === id);
 const getStore = (id) => data.stores.find((store) => store.id === id);
 const storesForSeller = (sellerId) => data.stores.filter((store) => store.sellerId === sellerId);
-const storeListings = (store) => allListings().filter((listing) => listing.storeId === store.id);
+/**
+ * A listing is on a store only when this seller owns that store.
+ * Matching `storeId` alone would let a listing show up on a demo shop or another seller's shop.
+ */
+const listingOnStore = (listing, store) =>
+  Boolean(listing && store && listing.storeId && listing.sellerId) &&
+  listing.storeId === store.id &&
+  listing.sellerId === store.sellerId;
+
+/** The store this listing belongs to, or null when the store id is not one this seller owns. */
+const storeForListing = (listing) => {
+  const store = listing ? getStore(listing.storeId) : null;
+  return listingOnStore(listing, store) ? store : null;
+};
+
+const storeListings = (store) => allListings().filter((listing) => listingOnStore(listing, store));
 const storeKinds = (store) => new Set(storeListings(store).map((listing) => listing.kind));
 const storeCategories = (store) => [...new Set(storeListings(store).map((listing) => listing.category))];
 
