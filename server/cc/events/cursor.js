@@ -24,3 +24,16 @@ exports.get = async () => {
 exports.set = async sequenceId => {
   await db.query('update event_cursor set sequence_id = $1', [sequenceId]);
 };
+
+/**
+ * Moves the start time forward while no event has been stored yet.
+ * An older time is left as it is, and a saved sequence id is left as it is.
+ *
+ * @param {Date} startedAt a start time Sharetribe will still accept
+ */
+exports.setStartedAt = async startedAt => {
+  await db.query(
+    'update event_cursor set started_at = $1 where sequence_id is null and started_at < $1',
+    [startedAt]
+  );
+};
