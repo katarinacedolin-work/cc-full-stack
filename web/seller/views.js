@@ -55,11 +55,11 @@ function statusPill(status, label) {
 
 function buyerAvatar(person) {
   const personId = person.buyer || person.name || person.id;
-  return personMark("span", `mini-avatar buyer-avatar ${person.accent || "lilac"}`, person.initials, personId);
+  return personMark("span", `mini-avatar buyer-avatar ${accentClass(person.accent, "lilac")}`, person.initials, personId);
 }
 
 function listingThumb(listing) {
-  return `<span class="activity-thumb ${listing?.accent || "lilac"}">${listing?.emoji || "✦"}</span>`;
+  return `<span class="activity-thumb ${accentClass(listing?.accent, "lilac")}">${emojiHtml(listing?.emoji, "✦")}</span>`;
 }
 
 function deltaHtml(delta) {
@@ -421,7 +421,7 @@ function sellerOrderView() {
   return `${sellerHeader({ eyebrow: `${order.kind === "service" ? "Booking" : "Order"} · CC-${order.id.slice(-4).toUpperCase()}`, title: escapeHtml(orderListingTitle(order)), sub: `${escapeHtml(order.buyer)} · placed ${escapeHtml(timeAgo(order.placedAt))}`, back: { action: "seller-back-to-orders", label: "Back to orders" }, actions: `<button class="ghost-button" data-action="seller-message-buyer" data-id="${order.id}">${icon("chat")} Message buyer</button>` })}
     <div class="order-layout">
       <section class="order-panel">
-        <div class="order-main-top"><div class="summary-visual" style="border:0;padding:0">${listing ? cardThumb(listing.title, listing.accent, listing.emoji) : ""}<div><strong>${escapeHtml(orderListingTitle(order))}</strong><div class="small muted">${escapeHtml(getStore(listing?.storeId)?.name || "")}</div></div></div>${statusPill(order.status, orderStatusLabel(order))}</div>
+        <div class="order-main-top"><div class="summary-visual" style="border:0;padding:0">${listing ? cardThumb(listing.title, listing.accent, listing.emoji) : ""}<div><strong>${escapeHtml(orderListingTitle(order))}</strong><div class="small muted">${escapeHtml(storeForListing(listing)?.name || "")}</div></div></div>${statusPill(order.status, orderStatusLabel(order))}</div>
         ${orderTimeline(order)}
         <div class="order-detail-card seller-order-details">
           <div class="order-detail-row"><span>${order.kind === "service" ? "When" : "Pickup"}</span><strong>${escapeHtml(orderWhen(order))}</strong></div>
@@ -642,7 +642,7 @@ function sellerNotificationsView() {
   const unread = data.notifications.filter((notification) => notification.unread).length;
   return `${sellerHeader({ eyebrow: "Seller Hub", title: "Notifications", sub: unread ? `${unread} unread. Tap one to jump straight to it.` : "You're all caught up.", actions: `<button class="ghost-button" data-action="seller-open-notification-settings">${icon("settings")} Settings</button><button class="primary-button" data-action="mark-all-notifications-read">${icon("check")} Mark all read</button>` })}
     <div class="seller-chip-row" style="margin-bottom:16px">${chips}</div>
-    ${list.length ? `<div class="seller-notification-list">${list.map((notification) => `<button type="button" class="seller-notification ${notification.unread ? "unread" : ""}" data-action="open-notification" data-id="${notification.id}"><span class="activity-thumb ${notification.accent}">${notification.emoji}</span><span class="seller-notification-copy"><span class="notification-popover-top"><strong>${escapeHtml(notification.title)}</strong><span class="muted small">${escapeHtml(timeAgo(notification.at))}</span></span><span class="muted small">${escapeHtml(notification.body)}</span></span>${notification.unread ? `<span class="unread-dot" aria-label="Unread"></span>` : ""}${icon("chevron-right")}</button>`).join("")}</div>`
+    ${list.length ? `<div class="seller-notification-list">${list.map((notification) => `<button type="button" class="seller-notification ${notification.unread ? "unread" : ""}" data-action="open-notification" data-id="${notification.id}"><span class="activity-thumb ${accentClass(notification.accent)}">${emojiHtml(notification.emoji)}</span><span class="seller-notification-copy"><span class="notification-popover-top"><strong>${escapeHtml(notification.title)}</strong><span class="muted small">${escapeHtml(timeAgo(notification.at))}</span></span><span class="muted small">${escapeHtml(notification.body)}</span></span>${notification.unread ? `<span class="unread-dot" aria-label="Unread"></span>` : ""}${icon("chevron-right")}</button>`).join("")}</div>`
       : `<div class="empty-state"><div class="empty-shape">🔔</div><h3>Nothing here yet.</h3><p class="muted">Try another filter.</p></div>`}`;
 }
 
@@ -791,10 +791,10 @@ function sellerAvailabilityView() {
 /* ---------- Store ---------- */
 
 function storeManageCard(store) {
-  const listings = everyListing().filter((listing) => listing.storeId === store.id);
+  const listings = everyListing().filter((listing) => listingOnStore(listing, store));
   const active = listings.filter((listing) => listingStatus(listing) === "active").length;
   return `<article class="store-manage-card">
-    <div class="${storeBannerClass(store)}">${storeBannerContents(store, `<span class="store-card-previews" aria-hidden="true">${listings.slice(0, 3).map((listing) => `<span>${listing.emoji}</span>`).join("")}</span>`)}</div>
+    <div class="${storeBannerClass(store)}">${storeBannerContents(store, `<span class="store-card-previews" aria-hidden="true">${listings.slice(0, 3).map((listing) => `<span>${emojiHtml(listing.emoji)}</span>`).join("")}</span>`)}</div>
     ${personMark("span", "store-card-logo", getSeller(store.sellerId).initials, store.sellerId, `aria-hidden="true"`)}
     <div class="store-card-body">
       <span class="store-card-name">${escapeHtml(store.name)}</span>
@@ -825,9 +825,9 @@ function sellerStoreEditView() {
   const store = getStore(state.seller.editStoreId);
   const draft = state.seller.draft;
   if (!store || !draft) return sellerStoresView();
-  const storeItems = everyListing().filter((listing) => listing.storeId === store.id);
+  const storeItems = everyListing().filter((listing) => listingOnStore(listing, store));
   const swatches = ACCENTS.map((accent) => `<button type="button" class="swatch ${accent} ${draft.accent === accent ? "active" : ""}" data-action="seller-set-draft-accent" data-accent="${accent}" aria-label="${accent} theme"></button>`).join("");
-  const collections = draft.collections.map((collection, index) => `<div class="collection-block"><div class="collection-head"><input aria-label="Collection name" data-collection-name="${index}" value="${escapeHtml(collection.name)}" /><button type="button" class="icon-button danger" data-action="seller-remove-collection" data-index="${index}" aria-label="Remove ${escapeHtml(collection.name)}">${icon("trash")}</button></div><div class="collection-items">${storeItems.map((listing) => `<label class="collection-item"><input type="checkbox" data-collection-index="${index}" value="${listing.id}" ${collection.listingIds.includes(listing.id) ? "checked" : ""} /> <span>${listing.emoji} ${escapeHtml(listing.title)}</span></label>`).join("") || `<span class="muted small">Add listings to this store first.</span>`}</div></div>`).join("");
+  const collections = draft.collections.map((collection, index) => `<div class="collection-block"><div class="collection-head"><input aria-label="Collection name" data-collection-name="${index}" value="${escapeHtml(collection.name)}" /><button type="button" class="icon-button danger" data-action="seller-remove-collection" data-index="${index}" aria-label="Remove ${escapeHtml(collection.name)}">${icon("trash")}</button></div><div class="collection-items">${storeItems.map((listing) => `<label class="collection-item"><input type="checkbox" data-collection-index="${index}" value="${listing.id}" ${collection.listingIds.includes(listing.id) ? "checked" : ""} /> <span>${emojiHtml(listing.emoji)} ${escapeHtml(listing.title)}</span></label>`).join("") || `<span class="muted small">Add listings to this store first.</span>`}</div></div>`).join("");
   return `${sellerHeader({ eyebrow: "Edit store", title: escapeHtml(store.name), sub: plural(storeItems.length, "listing"), back: { view: "seller-stores", label: "Back to your store" }, actions: `<button class="ghost-button" data-action="seller-preview-store" data-id="${store.id}">${icon("eye")} Preview store</button>` })}
     <div class="editor-layout">
       <form class="form-card editor-form" data-form="seller-save-store">
@@ -872,7 +872,7 @@ function sellerReviewsView() {
     .map((chip) => `<button type="button" class="filter-button ${filter === chip.id ? "active" : ""}" data-action="seller-set-reviews-filter" data-filter="${chip.id}">${chip.label}</button>`).join("");
   const rows = list.map((review) => {
     const listing = getListing(review.listingId);
-    return `<article class="store-review"><div class="store-review-top"><div><strong>${escapeHtml(review.author)}</strong> <span class="muted small">· ${escapeHtml(timeAgo(review.at))}</span></div><span class="store-review-stars" aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</span></div><p>“${escapeHtml(review.text)}”</p>${listing ? `<span class="store-review-listing">${listing.emoji} ${escapeHtml(listing.title)}</span>` : ""}
+    return `<article class="store-review"><div class="store-review-top"><div><strong>${escapeHtml(review.author)}</strong> <span class="muted small">· ${escapeHtml(timeAgo(review.at))}</span></div><span class="store-review-stars" aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</span></div><p>“${escapeHtml(review.text)}”</p>${listing ? `<span class="store-review-listing">${emojiHtml(listing.emoji)} ${escapeHtml(listing.title)}</span>` : ""}
       ${review.reply ? `<div class="review-reply"><span class="small"><strong>Your reply</strong></span><p>${escapeHtml(review.reply)}</p></div>` : `<form class="review-reply-form" data-form="seller-review-reply" data-id="${review.id}"><textarea name="reply" rows="2" required placeholder="Thank ${escapeHtml(firstName(review.author))} or add context…" aria-label="Reply to ${escapeHtml(review.author)}"></textarea><button class="primary-button" type="submit">Reply</button></form>`}</article>`;
   }).join("");
   return `${sellerHeader({ eyebrow: "Seller Hub", title: "Reviews", sub: "Every review comes from a completed booking or pickup. Replies are public.", back: { view: "seller-profile", label: "Back to profile" } })}

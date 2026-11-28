@@ -240,9 +240,64 @@ const api = (() => {
     });
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
-      fail(payload?.error?.message || "Something went wrong. Please try again.");
+      const error = new Error(payload?.error?.message || "Something went wrong. Please try again.");
+      error.status = response.status;
+      error.code = payload?.error?.code;
+      throw error;
     }
     return payload;
+  }
+
+  /**
+   * Away mode is stored on the Sharetribe profile. The mock settings object is rebuilt on
+   * every load, so without this the toggle reads off while the listings stay closed.
+   */
+  async function syncAwayMode(settings) {
+    try {
+      const { session } = await ccFetch("/session");
+      if (session && typeof session.awayMode === "boolean") settings.awayMode = session.awayMode;
+    } catch {
+      // Sharetribe is not configured. The in-memory flag is the source of truth.
+    }
+    return settings;
+  }
+
+  /** Demo listings only. Live listings are paused by POST /listings/away, which must succeed first. */
+  function applyMockAway(away) {
+    db.listings.filter((listing) => listing.sellerId === db.seller.id).forEach((listing) => {
+      if (away && (listing.status || "active") === "active") {
+        Object.assign(listing, { status: "paused", awayPaused: true });
+      } else if (!away && listing.awayPaused) {
+        Object.assign(listing, { status: "active", awayPaused: undefined });
+      }
+    });
+  }
+
+  /** A seed listing when the id is one of those, otherwise the Sharetribe listing with that id. */
+  async function listingById(id) {
+    const local = db.listings.find((listing) => listing.id === id);
+    if (local) return local;
+    const { listing } = await ccFetch(`/listings/${encodeURIComponent(id)}`);
+    return listing || fail("That listing is no longer here.");
+  }
+
+  /** Times this browser already booked, so the picker and checkout agree until the page reloads. */
+  function withoutBookedSlots(listingId, slots) {
+    const taken = new Set(
+      db.buyer.orders
+        .filter((order) => order.listingId === listingId && order.kind === "service" && order.date && order.time && OPEN_STATUSES.includes(order.status))
+        .map((order) => `${order.date}|${order.time}`)
+    );
+    return (slots || []).filter((slot) => !taken.has(`${slot.date}|${slot.time}`));
+  }
+
+  async function assertSharetribeSlotOpen(listingId, date, time) {
+    const takenHere = db.buyer.orders.some((order) => (
+      order.listingId === listingId && order.kind === "service" && order.date === date && order.time === time && OPEN_STATUSES.includes(order.status)
+    ));
+    if (takenHere) fail("That time was just taken. Pick another one.");
+    const { slots } = await ccFetch(`/listings/${encodeURIComponent(listingId)}/availability`);
+    if (!(slots || []).some((slot) => slot.date === date && slot.time === time)) fail("That time was just taken. Pick another one.");
   }
 
   const endpoints = {
@@ -285,29 +340,38 @@ const api = (() => {
     getStores: async () => {
       try {
         const { stores } = await ccFetch("/stores");
-        return stores.length ? stores : db.stores;
+        // Empty is a real result: anonymous browse and a seller with no store.
+        // Seed data is only for when the stores endpoint itself fails.
+        return Array.isArray(stores) ? stores : db.stores;
       } catch {
         return db.stores;
       }
     },
-    /** Services booked from weekly hours also carry `nextOpening` ({ date, time } or null). */
+    /**
+     * Services booked from weekly hours also carry `nextOpening` ({ date, time } or null).
+     * A failed `/listings` request is an error. Seed listings must not stand in for the live catalog.
+     */
     getListings: async () => {
-      try {
-        const mine = document.body.dataset.mode === "seller";
-        const { listings } = await ccFetch(`/listings${mine ? "?mine=1" : ""}`);
-        return listings.map((listing) =>
-          usesWeeklyHours(listing) ? { ...listing, nextOpening: weeklySlots(listing)[0] || null } : listing
-        );
-      } catch {
-        return db.listings.map((listing) =>
-          usesWeeklyHours(listing) ? { ...listing, nextOpening: weeklySlots(listing)[0] || null } : listing
-        );
-      }
+      const mine = document.body.dataset.mode === "seller";
+      const { listings } = await ccFetch(`/listings${mine ? "?mine=1" : ""}`);
+      if (!Array.isArray(listings)) fail("Could not load listings.");
+      return listings.map((listing) =>
+        usesWeeklyHours(listing) ? { ...listing, nextOpening: weeklySlots(listing)[0] || null } : listing
+      );
     },
-    /** Open times for a service. `duration` is set when times come from weekly hours, so the picker shows a full calendar. */
-    getAvailability: (listingId) => {
-      const listing = find(db.listings, listingId, "listing");
-      return usesWeeklyHours(listing) ? { duration: durationMinutes(listing), slots: weeklySlots(listing) } : { duration: null, slots: fixedSlots(listing) };
+    /**
+     * Open times for a service. `duration` is set for a full calendar.
+     * Seed listings stay on the demo calendar. Every other id is a Sharetribe listing.
+     */
+    getAvailability: async (listingId) => {
+      const local = db.listings.find((listing) => listing.id === listingId);
+      if (local) {
+        return usesWeeklyHours(local)
+          ? { duration: durationMinutes(local), slots: weeklySlots(local) }
+          : { duration: null, slots: fixedSlots(local) };
+      }
+      const availability = await ccFetch(`/listings/${encodeURIComponent(listingId)}/availability`);
+      return { duration: availability.duration ?? null, slots: withoutBookedSlots(listingId, availability.slots) };
     },
 
     createListing: async (fields) => {
@@ -464,13 +528,18 @@ const api = (() => {
 
     getOrders: () => db.buyer.orders,
 
-    /** Books a service (`date` and `time` from getAvailability), or buys a product or ticket (`quantity`). */
-    placeOrder: ({ listingId, date, time, quantity }) => {
-      const listing = find(db.listings, listingId, "listing");
+    /**
+     * Books a service (`date` and `time` from getAvailability), or buys a product or ticket (`quantity`).
+     * Seed listings still book in the demo catalog. Any other id is a Sharetribe listing.
+     */
+    placeOrder: async ({ listingId, date, time, quantity }) => {
+      const listing = await listingById(listingId);
+      const tracked = db.listings.includes(listing);
       const { kind } = listing;
       const count = kind === "product" ? Math.max(1, Math.floor(Number(quantity)) || 1) : 1;
       if (listing.status && listing.status !== "active") fail("That listing is not available right now.");
       if (kind === "service" && !(date && time)) fail("Pick a time first.");
+      if (kind === "service" && !tracked) await assertSharetribeSlotOpen(listingId, date, time);
       if (kind !== "service" && listing.quantityAvailable < count) fail(listing.quantityAvailable ? `Only ${listing.quantityAvailable} left.` : kind === "ticket" ? "That ticket is sold out." : "That one just sold out.");
 
       /* Only the demo seller answers requests. Bookings with anyone else are confirmed straight away. */
@@ -480,7 +549,8 @@ const api = (() => {
       if (kind === "service") Object.assign(order, { date, time });
       if (kind === "product") order.note = "Pickup details come after the seller accepts";
       if (kind === "ticket") Object.assign(order, { note: listing.availability, ticketCode: makeTicketCode(), ticketStatus: "valid" });
-      if (kind !== "service") {
+      // Seed stock lives on the mock listing. Sharetribe stock moves when a transaction is booked.
+      if (kind !== "service" && tracked) {
         listing.quantityAvailable -= count;
         if (kind === "product" && listing.quantityAvailable === 0) listing.status = "soldout";
       }
@@ -638,27 +708,27 @@ const api = (() => {
 
     /* Selling: settings, hours and calendar */
 
-    getSellerSettings: () => db.seller.settings,
+    getSellerSettings: () => syncAwayMode(db.seller.settings),
 
     /** Turning `awayMode` on pauses every active listing. Turning it off brings those same listings back. */
     updateSellerSettings: async (changes) => {
       const settings = db.seller.settings;
+      // Read the saved flag before applying the click. A reload leaves the mock at off,
+      // and treating that as the previous value would close more listings instead of restoring them.
+      if ("awayMode" in changes) await syncAwayMode(settings);
       const wasAway = settings.awayMode;
-      Object.assign(settings, pick(changes, Object.keys(settings)));
-      if ("awayMode" in changes && settings.awayMode !== wasAway) {
+      const next = pick(changes, Object.keys(settings));
+      if ("awayMode" in next && next.awayMode !== wasAway) {
         try {
-          await ccFetch("/listings/away", { method: "POST", body: { away: settings.awayMode } });
-        } catch {
-          // Fall back to the in-memory pause when Sharetribe is not configured.
-          db.listings.filter((listing) => listing.sellerId === db.seller.id).forEach((listing) => {
-            if (settings.awayMode && (listing.status || "active") === "active") {
-              Object.assign(listing, { status: "paused", awayPaused: true });
-            } else if (!settings.awayMode && listing.awayPaused) {
-              Object.assign(listing, { status: "active", awayPaused: undefined });
-            }
-          });
+          await ccFetch("/listings/away", { method: "POST", body: { away: next.awayMode } });
+        } catch (error) {
+          // Only the demo, with no Sharetribe keys, may pause in-memory listings.
+          // Any other failure leaves the toggle where it was so the seller is not told it worked.
+          if (error.code !== "sharetribe-not-configured") throw error;
+          applyMockAway(next.awayMode);
         }
       }
+      Object.assign(settings, next);
       return settings;
     },
 
@@ -687,14 +757,29 @@ const api = (() => {
     },
 
     /** `changes`: name, handle, tagline, emoji, accent, announcement, about, policies, collections. */
-    updateStore: (id, changes) => {
-      const store = find(db.stores, id, "store");
-      if (store.sellerId !== me().id) fail("Only the owner can change that store.");
-      const fields = pick(changes, ["name", "handle", "tagline", "emoji", "accent", "announcement", "about", "policies", "collections"]);
+    updateStore: async (id, changes) => {
+      const fields = pick(changes, [
+        "name", "handle", "tagline", "emoji", "accent", "announcement", "about", "policies", "collections"
+      ]);
       if ("name" in fields && !String(fields.name).trim()) fail("Give the store a name.");
       if (fields.handle) fields.handle = fields.handle.replace(/^@?/, "@");
-      if (fields.collections) fields.collections = fields.collections.filter((collection) => collection.name.trim()).map((collection) => ({ name: collection.name.trim(), listingIds: collection.listingIds }));
-      return Object.assign(store, fields);
+      if (fields.collections) {
+        fields.collections = fields.collections
+          .filter((collection) => String(collection.name || "").trim())
+          .map((collection) => ({ name: collection.name.trim(), listingIds: collection.listingIds || [] }));
+      }
+      try {
+        const { store } = await ccFetch(`/stores/${encodeURIComponent(id)}`, { method: "PUT", body: fields });
+        return store;
+      } catch (error) {
+        // Seed data is only used when the stores API is unreachable. A store that exists
+        // only on the seller's profile is not in that list, so the API error is shown.
+        const offline = !error.status || error.status >= 500;
+        const store = offline ? db.stores.find((entry) => entry.id === id) : null;
+        if (!store) throw error;
+        if (store.sellerId !== me().id) fail("Only the owner can change that store.");
+        return Object.assign(store, fields);
+      }
     },
 
     /* Selling: payouts */

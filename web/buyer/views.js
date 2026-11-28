@@ -53,10 +53,10 @@ function ticketPriceLabel(amount) {
 
 function ticketListingCard(listing) {
   const blurb = listing.summary || listing.description;
-  const figure = `<span class="board-card-emoji" aria-hidden="true">${listing.emoji}</span>`;
+  const figure = `<span class="board-card-emoji" aria-hidden="true">${emojiHtml(listing.emoji)}</span>`;
   return `<article class="board-card ticket-card">
     <button type="button" class="board-card-button" data-action="open-listing" data-id="${listing.id}">
-      ${framedMedia("span", `board-card-visual ${listing.accent}`, listing.title, figure)}
+      ${framedMedia("span", `board-card-visual ${accentClass(listing.accent)}`, listing.title, figure)}
       <span class="board-card-body">
         <span class="board-card-kicker">${escapeHtml(ticketHost(listing))}</span>
         <span class="board-card-title">${escapeHtml(listing.title)}</span>
@@ -81,11 +81,11 @@ function listingCardMetaHtml(listing) {
 }
 
 function listingVisual(listing, detail = false) {
-  const figure = `<span class="detail-figure" aria-hidden="true">${listing.emoji}</span>`;
-  if (detail) return framedMedia("div", `detail-visual ${listing.accent}`, listing.title, figure);
+  const figure = `<span class="detail-figure" aria-hidden="true">${emojiHtml(listing.emoji)}</span>`;
+  if (detail) return framedMedia("div", `detail-visual ${accentClass(listing.accent)}`, listing.title, figure);
   const caption = listing.kind === "service" ? listingCertificationLabel(listing) : listingConditionLabel(listing);
   const captionHtml = caption ? `<span class="visual-caption">${escapeHtml(caption)}</span>` : "";
-  return framedMedia("div", `listing-visual ${listing.accent}`, listing.title, "", { after: captionHtml });
+  return framedMedia("div", `listing-visual ${accentClass(listing.accent)}`, listing.title, "", { after: captionHtml });
 }
 
 function listingCard(listing) {
@@ -186,7 +186,7 @@ function matchingSchoolServices() {
 function schoolServiceCard(service) {
   return `<article class="school-service-card">
     <button type="button" class="school-service-button" data-action="open-school-service" data-id="${escapeHtml(service.id)}">
-      ${framedMedia("div", `listing-visual ${service.accent}`, service.title, `<span class="visual-figure" aria-hidden="true">${service.emoji}</span>`, { after: schoolBadgeHtml() })}
+      ${framedMedia("div", `listing-visual ${accentClass(service.accent)}`, service.title, `<span class="visual-figure" aria-hidden="true">${emojiHtml(service.emoji)}</span>`, { after: schoolBadgeHtml() })}
       <div class="school-service-body">
         <div class="listing-title">${escapeHtml(service.title)}</div>
         <div class="listing-meta-line muted small">${escapeHtml(service.hours)}</div>
@@ -207,7 +207,7 @@ function schoolServiceDetailView(service) {
     : "";
   return `<div class="page-top-row"><button class="back-button" data-action="back-from-school-service">${icon("chevron-left")} Back to ${backLabel}</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="school-service/${service.id}">${icon("share")} Share</button></div></div>
     <div class="detail-layout">
-      <div class="detail-gallery">${framedMedia("div", `detail-visual ${service.accent}`, service.title, `<span class="detail-figure" aria-hidden="true">${service.emoji}</span>`, { before: schoolBadgeHtml() })}</div>
+      <div class="detail-gallery">${framedMedia("div", `detail-visual ${accentClass(service.accent)}`, service.title, `<span class="detail-figure" aria-hidden="true">${emojiHtml(service.emoji)}</span>`, { before: schoolBadgeHtml() })}</div>
       <div class="detail-copy">
         <div class="eyebrow">${escapeHtml(service.category)} · School-provided service</div>
         <h1>${escapeHtml(service.title)}</h1>
@@ -237,7 +237,7 @@ function browseResults(kind) {
     if (kind === "product" && listing.merchandiseType === "resale") return false;
     if (listing.storeOnly && !searching) return false;
     if (state.category !== "All" && listing.category !== state.category) return false;
-    return matchesSearch(state.query, listing.title, listing.seller, listing.category, listing.description, merchandiseTypeLabel(listing), getStore(listing.storeId)?.name || "");
+    return matchesSearch(state.query, listing.title, listing.seller, listing.category, listing.description, merchandiseTypeLabel(listing), storeForListing(listing)?.name || "");
   });
   const order = {
     "price-low": (a, b) => a.price - b.price,
@@ -346,7 +346,7 @@ function listingDetailView(listing) {
   const service = listing.kind === "service";
   const ticket = listing.kind === "ticket";
   const onBoard = isChoreListing(listing);
-  const store = getStore(listing.storeId);
+  const store = storeForListing(listing);
   const returnStore = getStore(state.detailReturn);
   const sellerCard = onBoard
     ? `<div class="seller-card sold-by-card"><div class="seller-card-main"><div><div class="small muted">Listed on</div><div class="seller-name">Chore Board</div></div></div><button class="text-button visit-store-button" data-action="open-chore-board">Open Chore Board ${icon("arrow")}</button></div>`
@@ -480,7 +480,7 @@ function storeKindChips(store) {
 }
 
 function storePreviewEmojis(store, count = 3) {
-  return storeListings(store).slice(0, count).map((listing) => `<span>${listing.emoji}</span>`).join("");
+  return storeListings(store).slice(0, count).map((listing) => `<span>${emojiHtml(listing.emoji)}</span>`).join("");
 }
 
 function storeCard(store) {
@@ -526,7 +526,7 @@ function storeShopTab(store, listings) {
 function storeReviewsTab(store) {
   const reviewRows = store.reviewsSample.map((review) => {
     const listing = getListing(review.listingId);
-    return `<article class="store-review"><div class="store-review-top"><strong>${escapeHtml(review.author)}</strong><span class="store-review-stars" aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</span></div><p>“${escapeHtml(review.text)}”</p>${listing ? `<button type="button" class="store-review-listing" data-action="open-listing" data-id="${listing.id}"><span aria-hidden="true">${listing.emoji}</span> ${escapeHtml(listing.title)} ${icon("chevron-right", 14)}</button>` : ""}</article>`;
+    return `<article class="store-review"><div class="store-review-top"><strong>${escapeHtml(review.author)}</strong><span class="store-review-stars" aria-label="${review.rating} out of 5 stars">${"★".repeat(review.rating)}${"☆".repeat(5 - review.rating)}</span></div><p>“${escapeHtml(review.text)}”</p>${listing ? `<button type="button" class="store-review-listing" data-action="open-listing" data-id="${listing.id}"><span aria-hidden="true">${emojiHtml(listing.emoji)}</span> ${escapeHtml(listing.title)} ${icon("chevron-right", 14)}</button>` : ""}</article>`;
   }).join("");
   return `<div class="store-reviews">
     <div class="store-review-summary"><div class="store-review-score">${store.rating}</div><div><div class="store-review-stars large">★★★★★</div><p class="muted small" style="margin:4px 0 0">${store.reviews} reviews · every review is tied to a completed booking or pickup</p></div></div>
@@ -569,7 +569,7 @@ function storeView(store) {
     <section class="store-hero">
       <div class="${storeBannerClass(store, "store-hero-banner")}">${storeBannerContents(store, `<span class="store-hero-previews" aria-hidden="true">${storePreviewEmojis(store, 4)}</span>`)}</div>
       <div class="store-hero-body">
-        <div class="store-hero-logo ${store.accent}" aria-hidden="true">${store.emoji}</div>
+        <div class="store-hero-logo ${accentClass(store.accent)}" aria-hidden="true">${emojiHtml(store.emoji)}</div>
         <div class="store-hero-info">
           <div class="store-hero-kicker">${identityPill(seller)}<span>${escapeHtml(store.handle)}</span></div>
           <h1>${escapeHtml(store.name)}</h1>
@@ -619,8 +619,8 @@ function storesView() {
 /* ---------- Job Board and Housing ---------- */
 
 function contentBoardCard(item, action) {
-  const figure = `<span class="board-card-emoji" aria-hidden="true">${item.emoji}</span>`;
-  const face = `${framedMedia("span", `board-card-visual ${item.accent}`, item.title, figure)}
+  const figure = `<span class="board-card-emoji" aria-hidden="true">${emojiHtml(item.emoji)}</span>`;
+  const face = `${framedMedia("span", `board-card-visual ${accentClass(item.accent)}`, item.title, figure)}
       <span class="board-card-body">
         <span class="board-card-kicker">${escapeHtml(item.kicker)}</span>
         <span class="board-card-title">${escapeHtml(item.title)}</span>
@@ -644,7 +644,7 @@ function boardInquiryDetail(kind, item) {
     ? `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>${job ? "More jobs" : "More places"}</h2>${backButton(`Back to ${backLabel} ${icon("arrow")}`, "text-button")}</div><div class="home-scroll-row listing-scroll-row">${others.map((entry) => contentBoardCard(entry, job ? "open-job" : "open-housing")).join("")}</div></section>`
     : "";
   return `<div class="page-top-row">${backButton(`${icon("chevron-left")} Back to ${backLabel}`, "back-button")}<div class="button-row"><button class="ghost-button" data-action="share" data-path="${kind}/${item.id}">${icon("share")} Share</button></div></div>
-    <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${item.accent}`, item.title, `<span class="detail-figure" aria-hidden="true">${item.emoji}</span>`)}</div>
+    <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${accentClass(item.accent)}`, item.title, `<span class="detail-figure" aria-hidden="true">${emojiHtml(item.emoji)}</span>`)}</div>
       <div class="detail-copy"><div class="eyebrow">${escapeHtml(item.kicker)} · ${job ? "Job" : "Housing"}</div><h1>${escapeHtml(item.title)}</h1><span class="price">${escapeHtml(item.price)}</span>
         ${messageAction}
         <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", item.initials, item.poster)}<div><div class="small muted">${item.mine ? "Posted by you" : job ? "Hiring contact" : "Posted by"}</div><div class="seller-name">${escapeHtml(item.poster)}</div><div class="seller-sub">${studentVerifiedPill()}</div></div></div></div>
@@ -702,7 +702,7 @@ function housingPostForm() {
 function realEstateAgentCard(agent) {
   return `<article class="listing-card">
     <button type="button" class="listing-card-button" data-action="open-agent" data-id="${escapeHtml(agent.id)}">
-      ${framedMedia("div", `listing-visual ${agent.accent}`, agent.name, "", { after: `<span class="agent-badge">${icon("home", 13)} Licensed agent</span>` })}
+      ${framedMedia("div", `listing-visual ${accentClass(agent.accent)}`, agent.name, "", { after: `<span class="agent-badge">${icon("home", 13)} Licensed agent</span>` })}
       <div class="listing-body">
         <div class="listing-title">${escapeHtml(agent.name)}</div>
         <div class="listing-meta-line muted small">${escapeHtml(shortCardText(agent.summary))}</div>
@@ -725,7 +725,7 @@ function apartmentDetail(building) {
     ? `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>More buildings</h2><button class="text-button" data-action="close-board-item">Back to Housing ${icon("arrow")}</button></div><div class="home-scroll-row listing-scroll-row">${others.map((entry) => contentBoardCard(entry, "open-apartment")).join("")}</div></section>`
     : "";
   return `<div class="page-top-row"><button class="back-button" data-action="close-board-item">${icon("chevron-left")} Back to Housing</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="apartment/${building.id}">${icon("share")} Share</button></div></div>
-    <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${building.accent}`, building.title, `<span class="detail-figure" aria-hidden="true">${building.emoji}</span>`)}</div>
+    <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${accentClass(building.accent)}`, building.title, `<span class="detail-figure" aria-hidden="true">${emojiHtml(building.emoji)}</span>`)}</div>
       <div class="detail-copy"><div class="eyebrow">${escapeHtml(building.kicker)} · Apartment building</div><h1>${escapeHtml(building.title)}</h1><span class="price">${escapeHtml(building.price)}</span>
         <div class="detail-block board-role"><div class="board-description"><h3>Description</h3><p>${escapeHtml(building.summary)}</p></div><div class="board-facts"><h3>The building</h3>${facts}<div class="trust-note">Leasing is with the building. Student subleases are in Posted by students.</div></div></div>
       </div>
@@ -743,7 +743,7 @@ function agentInquiryDetail(agent) {
     .map(([label, value]) => `<div class="info-row info-row-line"><span class="trust-icon">${icon("check")}</span><strong>${escapeHtml(label)} · ${escapeHtml(value)}</strong></div>`).join("");
   const others = data.agents.filter((entry) => entry.id !== agent.id);
   return `<div class="page-top-row"><button class="back-button" data-action="close-board-item">${icon("chevron-left")} Back to Housing</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="agent/${agent.id}">${icon("share")} Share</button></div></div>
-    <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${agent.accent}`, agent.name, "", { after: `<span class="agent-badge agent-badge-detail">${icon("home", 13)} Licensed agent</span>` })}</div>
+    <div class="detail-layout"><div class="detail-gallery">${framedMedia("div", `detail-visual ${accentClass(agent.accent)}`, agent.name, "", { after: `<span class="agent-badge agent-badge-detail">${icon("home", 13)} Licensed agent</span>` })}</div>
       <div class="detail-copy"><div class="eyebrow">${escapeHtml(agent.brokerage)} · Agent</div><h1>${escapeHtml(agent.name)}</h1><span class="price">Free consult</span>
         <div class="detail-actions"><button class="primary-button" data-action="message-agent" data-id="${agent.id}">${icon("chat")} Message ${escapeHtml(firstName(agent.name))}</button></div>
         <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", agent.initials, agent.id)}<div><div class="small muted">Real estate agent</div><div class="seller-name">${escapeHtml(agent.name)}</div><div class="seller-sub">${escapeHtml(agent.brokerage)}</div></div></div></div>
@@ -830,7 +830,7 @@ function ticketsView() {
   const owned = mine.length
     ? `<section class="section"><div class="section-header"><h2>Your tickets</h2></div><div class="activity-list">${mine.map((order) => {
       const listing = getListing(order.listingId);
-      return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${listing?.accent || "coral"}">${listing?.emoji || "🎟️"}</span><span><span class="activity-title">${escapeHtml(listing?.title || "Ticket")}</span><span class="activity-sub">${order.ticketStatus === "used" ? "Used" : "Show QR code"} · ${escapeHtml(order.ticketCode)}</span></span></span>${icon("chevron-right")}</button>`;
+      return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${accentClass(listing?.accent, "coral")}">${emojiHtml(listing?.emoji, "🎟️")}</span><span><span class="activity-title">${escapeHtml(listing?.title || "Ticket")}</span><span class="activity-sub">${order.ticketStatus === "used" ? "Used" : "Show QR code"} · ${escapeHtml(order.ticketCode)}</span></span></span>${icon("chevron-right")}</button>`;
     }).join("")}</div></section>`
     : "";
   return `<div class="tickets-layout">
@@ -948,7 +948,7 @@ function choreDetail(chore) {
     ? `<section class="section section-home-shelf"><div class="section-header section-header-shelf"><h2>More on the board</h2><button class="text-button" data-action="close-chore">Back to Chore Board ${icon("arrow")}</button></div><div class="chore-board"><div class="chore-slip-grid">${others.map(choreSlip).join("")}</div></div></section>`
     : "";
   return `<div class="page-top-row"><button class="back-button" data-action="close-chore">${icon("chevron-left")} Back to Chore Board</button><div class="button-row"><button class="ghost-button" data-action="share" data-path="chore/${chore.id}">${icon("share")} Share</button></div></div>
-    <div class="detail-layout"><div class="detail-gallery"><div class="detail-visual ${chore.accent}"><span class="detail-figure" aria-hidden="true">${chore.emoji}</span></div></div>
+    <div class="detail-layout"><div class="detail-gallery"><div class="detail-visual ${accentClass(chore.accent)}"><span class="detail-figure" aria-hidden="true">${emojiHtml(chore.emoji)}</span></div></div>
       <div class="detail-copy"><div class="eyebrow">Chore Board · ${chore.mine ? "Your post" : "Student post"}</div><h1>${escapeHtml(chore.title)}</h1><span class="price">${escapeHtml(chore.price)}</span>
         ${choreOfferActions(chore)}
         <div class="seller-card"><div class="seller-card-main">${personMark("div", "seller-avatar", chore.initials, chore.poster)}<div><div class="small muted">${chore.mine ? "Posted by you" : "Posted by"}</div><div class="seller-name">${escapeHtml(chore.poster)}</div><div class="seller-sub">${studentVerifiedPill()}</div></div></div></div>
@@ -997,7 +997,7 @@ function chorePayView(chore) {
     <div class="checkout-layout"><section class="checkout-panel"><div class="eyebrow">Chore Board</div><h1>Pay through Campus Connect.</h1><p class="lede">${escapeHtml(firstName(chore.poster))} approved ${taker}. This payment stays on the platform.</p>
       <div class="step-list"><div class="step"><span class="step-number">1</span><div><strong>${escapeHtml(chore.title)}</strong><p>${escapeHtml(chore.meta)}</p></div></div><div class="step"><span class="step-number">2</span><div><strong>Pay ${taker}</strong><p>${escapeHtml(chore.poster)} is paying the student who is taking the chore.</p></div></div><div class="step"><span class="step-number">3</span><div><strong>On Campus Connect</strong><p>The money does not move outside the app.</p></div></div></div>
       <div class="button-row stretch"><button class="primary-button" data-action="confirm-chore-pay" data-id="${chore.id}">Confirm & pay ${total} ${icon("arrow")}</button></div>
-    </section><aside class="summary-card"><div class="summary-visual"><div class="summary-thumb ${chore.accent}">${chore.emoji}</div><div><strong>${escapeHtml(chore.title)}</strong><div class="small muted">To ${taker}</div></div></div><div class="summary-line"><span>Chore</span><strong>${total}</strong></div><div class="summary-line"><span>Platform fee</span><strong>$0.00</strong></div><div class="summary-line total"><span>Total</span><strong>${total}</strong></div><p class="checkout-disclaimer">This is a prototype only. No real account, order or payment is created.</p></aside></div>`;
+    </section><aside class="summary-card"><div class="summary-visual"><div class="summary-thumb ${accentClass(chore.accent)}">${emojiHtml(chore.emoji)}</div><div><strong>${escapeHtml(chore.title)}</strong><div class="small muted">To ${taker}</div></div></div><div class="summary-line"><span>Chore</span><strong>${total}</strong></div><div class="summary-line"><span>Platform fee</span><strong>$0.00</strong></div><div class="summary-line total"><span>Total</span><strong>${total}</strong></div><p class="checkout-disclaimer">This is a prototype only. No real account, order or payment is created.</p></aside></div>`;
 }
 
 /* ---------- Inbox ---------- */
@@ -1119,7 +1119,7 @@ function youView() {
   const unread = unreadCount(data.conversations);
   const orderRows = data.orders.map((order) => {
     const listing = getListing(order.listingId);
-    return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${order.accent || listing?.accent || "lilac"}">${order.emoji || listing?.emoji || "✦"}</span><span><span class="activity-title">${escapeHtml(order.title || listing?.title || "Campus Connect order")}</span><span class="activity-sub">${escapeHtml([buyerOrderStatus(order), buyerOrderWhen(order)].filter(Boolean).join(" · "))}</span></span></span>${icon("chevron-right")}</button>`;
+    return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${accentClass(order.accent || listing?.accent, "lilac")}">${emojiHtml(order.emoji || listing?.emoji, "✦")}</span><span><span class="activity-title">${escapeHtml(order.title || listing?.title || "Campus Connect order")}</span><span class="activity-sub">${escapeHtml([buyerOrderStatus(order), buyerOrderWhen(order)].filter(Boolean).join(" · "))}</span></span></span>${icon("chevron-right")}</button>`;
   }).join("");
   return `<div class="page-top-row"><div><div class="eyebrow">Your campus activity</div><h1 style="margin-bottom: 6px">You</h1></div><button class="ghost-button" data-view="settings">${icon("settings")} Settings</button></div>
   <section class="seller-hero profile-hero"><div class="seller-hero-main">${personMark("div", "seller-avatar", initialsOf(name), myId())}<div>${studentVerifiedPill()}<h2>${escapeHtml(name)}</h2>${data.account.showCampus ? `<p class="muted">SDSU</p>` : ""}<div class="seller-stats"><span><strong>${data.orders.length}</strong> orders</span><span><strong>${data.conversations.length}</strong> messages</span></div></div></div></section>
