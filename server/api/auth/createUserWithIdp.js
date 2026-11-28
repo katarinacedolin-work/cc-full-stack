@@ -7,6 +7,7 @@ const {
   clearPendingSignupTokenCookieOptions,
   parseJsonCookie,
 } = require('../../api-util/cookieOptions');
+const { emailForGoogleSignup } = require('../../cc/auth/googleSignupEmail');
 
 const CLIENT_ID = process.env.REACT_APP_SHARETRIBE_SDK_CLIENT_ID;
 const CLIENT_SECRET = process.env.SHARETRIBE_SDK_CLIENT_SECRET;
@@ -73,40 +74,69 @@ module.exports = (req, res) => {
 
   // idpToken and idpId are read from cookies above; strip them from the body so a
   // client cannot substitute a different IdP credential while reusing st-authinfo.
-  const { idpToken: _ignoredToken, idpId: _ignoredIdpId, ...rest } = req.body || {};
+  // Email is stripped too. For Google it is replaced with the verified token address.
+  const { idpToken: _ignoredToken, idpId: _ignoredIdpId, email: requestedEmail, ...rest } =
+    req.body || {};
 
   // Choose the idpClientId based on which authentication method is used.
   const idpClientId =
     idpId === FACEBOOK_IDP_ID ? FACBOOK_APP_ID : idpId === GOOGLE_IDP_ID ? GOOGLE_CLIENT_ID : null;
 
-  sdk.currentUser
-    .createWithIdp({ idpId, idpClientId, idpToken, ...rest })
-    .then(() =>
-      // After the user is created, we need to call loginWithIdp endpoint
-      // so that the user will be logged in.
-      sdk.loginWithIdp({
-        idpId,
-        idpClientId: `${idpClientId}`,
-        idpToken: `${idpToken}`,
-      })
-    )
-    .then(apiResponse => {
-      const { status, statusText, data } = apiResponse;
-      res
-        .clearCookie('st-authinfo', clearPendingSignupCookieOptions())
-        .clearCookie('st-idp-token', clearPendingSignupTokenCookieOptions())
-        .status(status)
-        .set('Content-Type', 'application/transit+json')
-        .send(
-          serialize({
-            status,
-            statusText,
-            data,
-          })
-        )
-        .end();
-    })
+  const createAndLogin = email => {
+    const createParams = {
+      idpId,
+      idpClientId,
+      idpToken,
+      ...rest,
+      ...(email ? { email } : {}),
+    };
+
+    return sdk.currentUser
+      .createWithIdp(createParams)
+      .then(() =>
+        // After the user is created, we need to call loginWithIdp endpoint
+        // so that the user will be logged in.
+        sdk.loginWithIdp({
+          idpId,
+          idpClientId: `${idpClientId}`,
+          idpToken: `${idpToken}`,
+        })
+      )
+      .then(apiResponse => {
+        const { status, statusText, data } = apiResponse;
+        res
+          .clearCookie('st-authinfo', clearPendingSignupCookieOptions())
+          .clearCookie('st-idp-token', clearPendingSignupTokenCookieOptions())
+          .status(status)
+          .set('Content-Type', 'application/transit+json')
+          .send(
+            serialize({
+              status,
+              statusText,
+              data,
+            })
+          )
+          .end();
+      });
+  };
+
+  const pendingEmail =
+    idpId === GOOGLE_IDP_ID
+      ? emailForGoogleSignup(idpToken, GOOGLE_CLIENT_ID, requestedEmail, authInfo?.email)
+      : Promise.resolve(requestedEmail || null);
+
+  return pendingEmail
+    .then(email => createAndLogin(email))
     .catch(e => {
+      if (e.status && e.code) {
+        handleError(res, {
+          status: e.status,
+          statusText: e.message,
+          message: e.message,
+          data: {},
+        });
+        return;
+      }
       handleError(res, e);
     });
 };

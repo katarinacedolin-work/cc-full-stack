@@ -21,6 +21,11 @@ jest.mock('../../api-util/sdk', () => ({
   typeHandlers: [],
 }));
 
+jest.mock('../../api-util/googleIdToken', () => ({
+  verifyGoogleIdToken: jest.fn(),
+}));
+
+const { verifyGoogleIdToken } = require('../../api-util/googleIdToken');
 const { getSdk } = require('../../api-util/sdk');
 const { signupWithGoogle } = require('./auth');
 
@@ -52,8 +57,17 @@ const currentUser = {
   },
 };
 
+const verifiedSdsuAccount = {
+  email: 'ada@sdsu.edu',
+  emailVerified: true,
+  givenName: 'Ada',
+  familyName: 'Lovelace',
+};
+
 describe('signupWithGoogle terms', () => {
   beforeEach(() => {
+    verifyGoogleIdToken.mockReset();
+    verifyGoogleIdToken.mockResolvedValue(verifiedSdsuAccount);
     __mockFns.createWithIdp.mockReset();
     __mockFns.loginWithIdp.mockReset();
     __mockFns.createWithIdp.mockResolvedValue({});
@@ -134,10 +148,81 @@ describe('signupWithGoogle terms', () => {
       res
     );
 
-    const { privateData } = __mockFns.createWithIdp.mock.calls[0][0];
-    expect(privateData.termsVersion).toBe('2026-01');
-    expect(privateData.termsAcceptedAt).not.toBe('1999-01-01T00:00:00.000Z');
-    expect(Date.parse(privateData.termsAcceptedAt)).toBeGreaterThanOrEqual(before);
+    const params = __mockFns.createWithIdp.mock.calls[0][0];
+    expect(params.email).toBe('ada@sdsu.edu');
+    expect(params.idpToken).toBe('token-from-cookie');
+    expect(params.privateData.termsVersion).toBe('2026-01');
+    expect(params.privateData.termsAcceptedAt).not.toBe('1999-01-01T00:00:00.000Z');
+    expect(Date.parse(params.privateData.termsAcceptedAt)).toBeGreaterThanOrEqual(before);
+    expect(verifyGoogleIdToken).toHaveBeenCalledWith('token-from-cookie', 'google-client-id');
     expect(res.status).toHaveBeenCalledWith(201);
+  });
+
+  it('does not create a user when the cookie email differs from the token email', async () => {
+    const res = mockRes();
+
+    await expect(
+      signupWithGoogle(
+        {
+          ip: 'email-swapped',
+          cookies: {
+            ...pendingCookies,
+            'st-authinfo': {
+              ...pendingCookies['st-authinfo'],
+              email: 'victim@sdsu.edu',
+            },
+          },
+          body: { firstName: 'Ada', lastName: 'Lovelace', acceptTerms: true },
+        },
+        res
+      )
+    ).rejects.toMatchObject({
+      status: 400,
+      code: 'google-session-expired',
+    });
+
+    expect(__mockFns.createWithIdp).not.toHaveBeenCalled();
+  });
+
+  it('rejects a token whose email is not a verified @sdsu.edu address', async () => {
+    verifyGoogleIdToken.mockResolvedValue({
+      email: 'ada@gmail.com',
+      emailVerified: true,
+    });
+    const res = mockRes();
+
+    await expect(
+      signupWithGoogle(
+        {
+          ip: 'token-not-sdsu',
+          cookies: pendingCookies,
+          body: { firstName: 'Ada', lastName: 'Lovelace', acceptTerms: true },
+        },
+        res
+      )
+    ).rejects.toMatchObject({ code: 'sdsu-email-required' });
+
+    expect(__mockFns.createWithIdp).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unverified token email even when the cookie says @sdsu.edu', async () => {
+    verifyGoogleIdToken.mockResolvedValue({
+      email: 'ada@sdsu.edu',
+      emailVerified: false,
+    });
+    const res = mockRes();
+
+    await expect(
+      signupWithGoogle(
+        {
+          ip: 'token-unverified',
+          cookies: pendingCookies,
+          body: { firstName: 'Ada', lastName: 'Lovelace', acceptTerms: true },
+        },
+        res
+      )
+    ).rejects.toMatchObject({ code: 'sdsu-email-required' });
+
+    expect(__mockFns.createWithIdp).not.toHaveBeenCalled();
   });
 });
