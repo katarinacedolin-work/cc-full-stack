@@ -237,26 +237,44 @@ exports.confirmPasswordReset = async (req, res) => {
  * POST /api/cc/verify-email
  * Body: { token }
  * The token comes from Sharetribe's email link: /verify-email?t=…
+ *
+ * currentUser.verifyEmail only succeeds for the signed-in user the token was
+ * issued to. A mail app or another device has no session, and Sharetribe then
+ * answers 403, the same status as an invalid token. Ask for sign-in first.
  */
 exports.verifyEmail = async (req, res) => {
-  const token = req.body?.token;
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
   if (!token) {
     throw httpError(400, 'token-required', 'Open the verification link from your email.');
+  }
+
+  const user = await loadCurrentUser(req, res);
+  if (!user) {
+    throw httpError(
+      401,
+      'auth-required',
+      'Sign in to verify this email. This link stays valid after you sign in.'
+    );
   }
 
   const sdk = getSdk(req, res);
   try {
     await sdk.currentUser.verifyEmail({ verificationToken: token });
   } catch (e) {
+    const reported = e?.data?.errors?.[0];
+    const title = reported?.title;
+    const genericStatus = !title || /^(forbidden|unauthorized)$/i.test(title);
     throw httpError(
       e.status || 400,
       'verify-failed',
-      sharetribeMessage(e, 'That verification link is invalid or has expired.')
+      (!genericStatus && title) ||
+        reported?.detail ||
+        'That verification link is invalid, has expired, or belongs to a different account.'
     );
   }
 
-  const user = await loadCurrentUser(req, res);
-  res.json({ session: toSession(user) });
+  const verified = await loadCurrentUser(req, res);
+  res.json({ session: toSession(verified) });
 };
 
 /**
@@ -279,8 +297,9 @@ exports.resendVerification = async (req, res) => {
 
 /**
  * POST /api/cc/signup-with-google
- * Body: { firstName, lastName, privateData? }
+ * Body: { firstName, lastName, acceptTerms: true }
  * Uses the pending Google cookies set by /api/auth/google/callback.
+ * Terms are recorded only after the caller agrees, and the timestamp comes from the server.
  */
 exports.signupWithGoogle = async (req, res) => {
   enforceLimit(signupLimiter, req);
@@ -305,10 +324,13 @@ exports.signupWithGoogle = async (req, res) => {
   if (!firstName || !lastName) {
     throw httpError(400, 'name-required', 'Add your first and last name.');
   }
+  if (req.body?.acceptTerms !== true) {
+    throw httpError(400, 'terms-required', 'Agree to the Terms and Privacy Policy to continue.');
+  }
 
   const privateData = {
-    termsAcceptedAt: req.body?.privateData?.termsAcceptedAt || new Date().toISOString(),
-    termsVersion: req.body?.privateData?.termsVersion || TERMS_VERSION,
+    termsAcceptedAt: new Date().toISOString(),
+    termsVersion: TERMS_VERSION,
   };
 
   const tokenStore = sharetribeSdk.tokenStore.expressCookieStore({

@@ -173,10 +173,7 @@ Object.assign(FORMS, {
       await api.signupWithGoogle({
         firstName: fields.firstName,
         lastName: fields.lastName,
-        privateData: {
-          termsAcceptedAt: new Date().toISOString(),
-          termsVersion: "2026-01"
-        }
+        acceptTerms: true
       });
       location.href = IS_SELLER ? "/sell" : "/";
     } catch (error) {
@@ -203,14 +200,19 @@ function readGooglePendingCookie() {
   const match = document.cookie.match(/(?:^|; )st-authinfo=([^;]*)/);
   if (!match) return null;
   try {
-    return JSON.parse(decodeURIComponent(match[1]));
+    // Express res.cookie prefixes JSON values with "j:" before URI-encoding.
+    const raw = decodeURIComponent(match[1]).replace(/^j:/, "");
+    return JSON.parse(raw);
   } catch {
     return null;
   }
 }
 
 function openAuthDeepLink() {
-  if (location.hash === "#/auth/google-confirm") {
+  // loginWithIdp used to append a second "#", so the hash arrived as
+  // "#/auth/google-confirm#". Drop one trailing "#" so that URL still matches.
+  const hash = (location.hash || "").replace(/#$/, "");
+  if (hash === "#/auth/google-confirm") {
     const pending = readGooglePendingCookie();
     state.googleFirstName = pending?.firstName || "";
     state.googleLastName = pending?.lastName || "";
@@ -219,12 +221,12 @@ function openAuthDeepLink() {
     setView("auth-google-confirm");
     return true;
   }
-  if (location.hash === "#/sign-in") {
+  if (hash === "#/sign-in") {
     history.replaceState(null, "", location.pathname);
     setView("sign-in");
     return true;
   }
-  if (location.hash === "#/sign-up") {
+  if (hash === "#/sign-up") {
     history.replaceState(null, "", location.pathname);
     setView("sign-up");
     return true;
@@ -237,7 +239,11 @@ function openAuthDeepLink() {
  * should not load mock catalog data yet.
  */
 async function gateAuth() {
-  if (new URLSearchParams(location.search).get("authError")) {
+  const authError = new URLSearchParams(location.search).get("authError");
+  if (authError === "not-configured") {
+    state.authError = "Google sign-in is not set up on this server yet.";
+    history.replaceState(null, "", location.pathname);
+  } else if (authError) {
     state.authError = "Google sign-in did not work. Use a Google account registered with your verified @sdsu.edu email.";
     history.replaceState(null, "", location.pathname);
   }

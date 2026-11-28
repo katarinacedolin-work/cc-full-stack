@@ -3,7 +3,11 @@ const https = require('https');
 const sharetribeSdk = require('sharetribe-flex-sdk');
 const log = require('../../log.js');
 const sdkUtils = require('../../api-util/sdk');
-const { buildMarketplaceRedirectUrl, isRelativePath } = require('../../api-util/url');
+const {
+  buildMarketplaceRedirectUrl,
+  guardOAuthRedirectFragment,
+  isRelativePath,
+} = require('../../api-util/url');
 const {
   authErrorCookieOptions,
   pendingSignupDisplayCookieOptions,
@@ -94,12 +98,9 @@ module.exports = (err, user, req, res, idpClientId, idpId) => {
     })
     .then(response => {
       if (response.status === 200) {
-        // If the user was authenticated, redirect back to to LandingPage
-        // We need to add # to the end of the URL because otherwise Facebook
-        // login will add their defaul #_#_ which breaks the routing in frontend.
-
+        // Facebook appends `#_=_` when this redirect has no fragment.
         const redirectUrl = buildMarketplaceRedirectUrl(rootUrl, from, defaultReturn);
-        res.redirect(`${redirectUrl}#`);
+        res.redirect(guardOAuthRedirectFragment(redirectUrl));
       }
     })
     .catch(() => {
@@ -126,6 +127,6 @@ module.exports = (err, user, req, res, idpClientId, idpId) => {
         .cookie('st-idp-token', user.idpToken, pendingSignupTokenCookieOptions());
 
       const confirmUrl = buildMarketplaceRedirectUrl(rootUrl, defaultConfirm);
-      res.redirect(`${confirmUrl}#`);
+      res.redirect(guardOAuthRedirectFragment(confirmUrl));
     });
 };

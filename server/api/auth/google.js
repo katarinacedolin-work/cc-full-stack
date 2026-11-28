@@ -79,10 +79,18 @@ const verifyCallback = (req, accessToken, refreshToken, rawReturn, profile, done
   done(null, userData);
 };
 
-// ClientId is required when adding a new Google strategy to passport
-if (clientID) {
+const googleConfigured = Boolean(clientID && clientSecret);
+
+// Client id and secret are required. Without them Passport has no "google" strategy,
+// and authenticate() throws "Unknown authentication strategy".
+if (googleConfigured) {
   passport.use(new GoogleStrategy(strategyOptions, verifyCallback));
 }
+
+const redirectGoogleNotConfigured = res => {
+  const base = (rootUrl || '').replace(/\/$/, '');
+  return res.redirect(`${base}/?authError=not-configured`);
+};
 
 /**
  * Initiate authentication with Google. When the funcion is called, Passport redirects the
@@ -93,6 +101,10 @@ if (clientID) {
  * @param {Function} next Call the next middleware function in the stack
  */
 exports.authenticateGoogle = (req, res, next) => {
+  if (!googleConfigured) {
+    return redirectGoogleNotConfigured(res);
+  }
+
   const { from, defaultReturn, defaultConfirm, userType } = req.query || {};
   const params = {
     ...(from ? { from } : {}),
@@ -122,6 +134,10 @@ exports.authenticateGoogle = (req, res, next) => {
  * @param {Function} next Call the next middleware function in the stack
  */
 exports.authenticateGoogleCallback = (req, res, next) => {
+  if (!googleConfigured) {
+    return redirectGoogleNotConfigured(res);
+  }
+
   // We've already defined the `verifyCallback` function for the Passport Google authentication
   // strategy. That function is normally used to verify the user information obtained from identity
   // provider, or alternatively create a new use while an internal Passport function is used to
