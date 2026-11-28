@@ -88,11 +88,12 @@ describe('listings.update status transitions', () => {
     expect(sdk.ownListings.open).not.toHaveBeenCalled();
   });
 
-  it('publishes a draft before pausing it', async () => {
+  it('does not publish a draft when pausing it', async () => {
     const { sdk } = await patch({ status: 'paused' }, 'draft');
 
-    expect(sdk.ownListings.publishDraft).toHaveBeenCalledTimes(1);
-    expect(sdk.ownListings.close).toHaveBeenCalledTimes(1);
+    expect(sdk.ownListings.publishDraft).not.toHaveBeenCalled();
+    expect(sdk.ownListings.close).not.toHaveBeenCalled();
+    expect(sdk.ownListings.update).toHaveBeenCalled();
   });
 
   it('keeps an already paused listing closed and reports it as paused', async () => {

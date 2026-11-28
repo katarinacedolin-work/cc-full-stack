@@ -79,12 +79,6 @@ const sharetribeMessage = (error, fallback) => {
   return first?.title || first?.detail || fallback;
 };
 
-const imageFile = (buffer, contentType) => {
-  const type = (contentType || 'image/jpeg').split(';')[0].trim() || 'image/jpeg';
-  const extension = type.endsWith('png') ? 'png' : type.endsWith('gif') ? 'gif' : 'jpg';
-  return new File([buffer], `photo.${extension}`, { type });
-};
-
 const downloadImage = async url => {
   let response;
   try {
@@ -105,7 +99,8 @@ const downloadImage = async url => {
   if (!buffer.length || buffer.length > MAX_IMAGE_BYTES) {
     throw httpError(502, 'image-copy-failed', 'Could not copy a photo from that listing.');
   }
-  return imageFile(buffer, type);
+  // The Node Sharetribe SDK accepts a Buffer as the image file body (same as /api/cc/images).
+  return buffer;
 };
 
 // An image id can belong to only one listing, so each photo is uploaded again.
@@ -117,9 +112,9 @@ const copyListingImages = async (sdk, listing, included) => {
 
   const images = [];
   for (const url of urls) {
-    const file = await downloadImage(url);
+    const buffer = await downloadImage(url);
     try {
-      const uploaded = await sdk.images.upload({ image: file }, { expand: true });
+      const uploaded = await sdk.images.upload({ image: buffer }, { expand: true });
       const id = uploaded?.data?.data?.id;
       if (!id?.uuid) {
         throw httpError(502, 'image-copy-failed', 'Could not copy a photo from that listing.');
@@ -426,17 +421,16 @@ exports.update = async (req, res) => {
   try {
     // open only reopens a closed listing. Seller Hub publishes a draft by setting
     // status to active, and that transition is publishDraft. Pause closes a published
-    // listing. Closing one that is already closed is not a valid transition.
+    // listing. Closing one that is already closed is not a valid transition. A draft is not
+    // visible to buyers, so pausing it needs no transition. Never publish it to close it,
+    // because a failed close would leave the listing live.
     const state = current.listing.attributes.state;
     const wantsPause = fields.status === 'paused' || fields.status === 'closed';
     if (fields.status === 'active' && state === 'draft') {
       await sdk.ownListings.publishDraft({ id });
     } else if (fields.status === 'active' && state === 'closed') {
       await sdk.ownListings.open({ id });
-    } else if (wantsPause && state === 'draft') {
-      await sdk.ownListings.publishDraft({ id });
-      await sdk.ownListings.close({ id });
-    } else if (wantsPause && state !== 'closed') {
+    } else if (wantsPause && state === 'published') {
       await sdk.ownListings.close({ id });
     }
     await sdk.ownListings.update(update);
@@ -554,7 +548,9 @@ const AWAY_MAX_PAGES = 50;
 const sharetribeConfigured = () => {
   const clientId = process.env.REACT_APP_SHARETRIBE_SDK_CLIENT_ID;
   const secret = process.env.SHARETRIBE_SDK_CLIENT_SECRET;
-  return Boolean(clientId) && clientId !== 'change-me' && secret !== 'change-me';
+  return (
+    Boolean(clientId) && clientId !== 'change-me' && Boolean(secret) && secret !== 'change-me'
+  );
 };
 
 const ownListingsInStates = async (sdk, states) => {

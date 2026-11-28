@@ -67,6 +67,7 @@ const loadCurrentUser = async (req, res) => {
 const hasRealSharetribeKeys = () =>
   CLIENT_ID &&
   CLIENT_ID !== 'change-me' &&
+  process.env.SHARETRIBE_SDK_CLIENT_SECRET &&
   process.env.SHARETRIBE_SDK_CLIENT_SECRET !== 'change-me';
 
 /**

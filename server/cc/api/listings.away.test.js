@@ -211,6 +211,16 @@ describe('listings.setAwayMode', () => {
     expect(getSdk).not.toHaveBeenCalled();
   });
 
+  it('does not call Sharetribe when the client secret is missing', async () => {
+    delete process.env.SHARETRIBE_SDK_CLIENT_SECRET;
+
+    await expect(listings.setAwayMode({ body: { away: true } }, mockRes())).rejects.toMatchObject({
+      status: 503,
+      code: 'sharetribe-not-configured',
+    });
+    expect(getSdk).not.toHaveBeenCalled();
+  });
+
   it('does not write the profile when the listing query fails', async () => {
     const res = mockRes();
     sdk.ownListings.query.mockRejectedValue(Object.assign(new Error('timeout'), { status: 500 }));
