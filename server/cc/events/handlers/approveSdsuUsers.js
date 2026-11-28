@@ -1,6 +1,7 @@
 /**
- * Approves verified @sdsu.edu users, and removes listing/order permissions from anyone
- * whose email is no longer an SDSU address.
+ * Approves verified @sdsu.edu users. An active user who leaves SDSU loses listing and
+ * order permissions. Coming back stays active, so approval does not run again, and
+ * those permissions are granted back once the SDSU email is verified.
  *
  * Requires "require approval to join" to be turned on in Sharetribe Console.
  */
@@ -15,6 +16,17 @@ const USER_EVENTS = new Set([
   'user/email_updated',
   'user/email_verified',
 ]);
+
+const DENY = 'permission/deny';
+const ALLOW = 'permission/allow';
+
+// Only write when the stored permissions would actually change. A redundant
+// updatePermissions call emits another user/updated event and keeps this worker looping.
+const listingOrOrdersDenied = permissions =>
+  permissions?.postListings === DENY || permissions?.initiateTransactions === DENY;
+
+const listingAndOrdersDenied = permissions =>
+  permissions?.postListings === DENY && permissions?.initiateTransactions === DENY;
 
 /**
  * @param {Object} event Sharetribe event resource
@@ -47,15 +59,38 @@ module.exports = async event => {
     return;
   }
 
-  if (!isSdsuEmail(email) && state === 'active') {
+  if (
+    !isSdsuEmail(email) &&
+    state === 'active' &&
+    !listingAndOrdersDenied(user.attributes?.permissions)
+  ) {
     try {
       await sdk.users.updatePermissions({
         id: user.id,
-        postListings: 'permission/deny',
-        initiateTransactions: 'permission/deny',
+        postListings: DENY,
+        initiateTransactions: DENY,
       });
     } catch (e) {
       log.error(e, 'cc-revoke-non-sdsu-permissions-failed', { userId: user.id.uuid });
+      throw e;
+    }
+    return;
+  }
+
+  if (
+    isSdsuEmail(email) &&
+    emailVerified &&
+    state === 'active' &&
+    listingOrOrdersDenied(user.attributes?.permissions)
+  ) {
+    try {
+      await sdk.users.updatePermissions({
+        id: user.id,
+        postListings: ALLOW,
+        initiateTransactions: ALLOW,
+      });
+    } catch (e) {
+      log.error(e, 'cc-restore-sdsu-permissions-failed', { userId: user.id.uuid });
       throw e;
     }
   }

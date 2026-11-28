@@ -12,7 +12,8 @@
  *   firstName: string,
  *   lastName: string,
  *   displayName: string,
- *   isAdmin: boolean
+ *   isAdmin: boolean,
+ *   awayMode: boolean
  * }|null}
  */
 exports.toSession = user => {
@@ -48,5 +49,8 @@ exports.toSession = user => {
     isAdmin: Boolean(metadata.isAdmin),
     termsAcceptedAt: privateData.termsAcceptedAt || null,
     termsVersion: privateData.termsVersion || null,
+    // Away mode lives on the profile. The seller hub mock resets on reload, so the
+    // toggle has to read this flag or it shows off while listings stay closed.
+    awayMode: Boolean(privateData.awayMode),
   };
 };

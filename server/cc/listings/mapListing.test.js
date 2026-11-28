@@ -1,5 +1,11 @@
 const { types } = require('sharetribe-flex-sdk');
-const { toCampusListing, toSharetribeAttrs, openAvailabilityPlan } = require('./mapListing');
+const {
+  toCampusListing,
+  toSharetribeAttrs,
+  openAvailabilityPlan,
+  isRemovedListing,
+  listingImageSourceUrls,
+} = require('./mapListing');
 
 const { UUID, Money } = types;
 
@@ -71,7 +77,7 @@ describe('toCampusListing', () => {
     });
   });
 
-  it('maps draft and closed states', () => {
+  it('maps a draft to draft and a closed listing to paused', () => {
     expect(
       toCampusListing(
         { ...listing, attributes: { ...listing.attributes, state: 'draft' } },
@@ -83,7 +89,20 @@ describe('toCampusListing', () => {
         { ...listing, attributes: { ...listing.attributes, state: 'closed' } },
         included
       ).status
-    ).toBe('closed');
+    ).toBe('paused');
+    const awayPaused = toCampusListing(
+      {
+        ...listing,
+        attributes: {
+          ...listing.attributes,
+          state: 'closed',
+          publicData: { ...listing.attributes.publicData, awayPaused: true },
+        },
+      },
+      included
+    );
+    expect(awayPaused.status).toBe('paused');
+    expect(awayPaused.awayPaused).toBe(true);
   });
 });
 
@@ -107,6 +126,46 @@ describe('toSharetribeAttrs', () => {
       merchandiseType: 'resale',
       quantityAvailable: 2,
     });
+  });
+
+  it('keeps a sold-out quantity of zero', () => {
+    const soldOut = toSharetribeAttrs({
+      kind: 'product',
+      title: 'Linen sundress',
+      description: 'Like new',
+      price: 22,
+      quantityAvailable: 0,
+    });
+    expect(soldOut.publicData.quantityAvailable).toBe(0);
+
+    const fromQuantity = toSharetribeAttrs({
+      kind: 'product',
+      title: 'Linen sundress',
+      description: 'Like new',
+      price: 22,
+      quantity: 0,
+    });
+    expect(fromQuantity.publicData.quantityAvailable).toBe(0);
+
+    // The seller form sends the stock field as a string.
+    const fromString = toSharetribeAttrs({
+      kind: 'product',
+      title: 'Linen sundress',
+      description: 'Like new',
+      price: 22,
+      quantityAvailable: '0',
+    });
+    expect(fromString.publicData.quantityAvailable).toBe(0);
+  });
+
+  it('defaults a missing product quantity to one', () => {
+    const attrs = toSharetribeAttrs({
+      kind: 'product',
+      title: 'Desk lamp',
+      description: 'Works well',
+      price: 12,
+    });
+    expect(attrs.publicData.quantityAvailable).toBe(1);
   });
 
   it('builds create attrs for a service', () => {
@@ -138,9 +197,66 @@ describe('toSharetribeAttrs', () => {
     });
   });
 
+  it('keeps an allowlisted accent and a plain emoji', () => {
+    const attrs = toSharetribeAttrs({
+      kind: 'service',
+      title: 'Tutoring',
+      description: 'Calc II',
+      price: 30,
+      accent: 'sky',
+      emoji: '∫',
+    });
+    expect(attrs.publicData.accent).toBe('sky');
+    expect(attrs.publicData.emoji).toBe('∫');
+  });
+
+  it('drops accent and emoji values that are not on the allowlist', () => {
+    const attrs = toSharetribeAttrs({
+      kind: 'product',
+      title: 'Lamp',
+      description: 'Works',
+      price: 12,
+      accent: 'butter" onmouseover="alert(1)',
+      emoji: '<img src=x onerror=alert(1)>',
+    });
+    expect(attrs.publicData.accent).toBe('butter');
+    expect(attrs.publicData.emoji).toBe('📦');
+  });
+
+  it('drops emoji that is text rather than a symbol', () => {
+    const attrs = toSharetribeAttrs({
+      kind: 'service',
+      title: 'Tutoring',
+      description: 'Calc II',
+      price: 30,
+      emoji: 'alert(1)',
+    });
+    expect(attrs.publicData.emoji).toBe('✨');
+  });
+
+  it('does not return stored markup from a public listing', () => {
+    const poisoned = {
+      ...listing,
+      attributes: {
+        ...listing.attributes,
+        publicData: {
+          ...listing.attributes.publicData,
+          accent: 'sky"><img src=x onerror=alert(1)>',
+          emoji: '<svg onload=alert(1)>',
+        },
+      },
+    };
+    const mapped = toCampusListing(poisoned, included);
+    expect(mapped.accent).toBe('cobalt');
+    expect(mapped.emoji).toBe('✨');
+  });
+
   it('keeps a listing the same when its mapped form is saved again', () => {
     const before = toCampusListing(listing, included);
-    const attrs = toSharetribeAttrs({ ...before, title: 'Calc II tutoring' });
+    const attrs = toSharetribeAttrs(
+      { ...before, title: 'Calc II tutoring' },
+      { ownedStoreIds: ['store-1'] }
+    );
     expect(attrs.publicData).toMatchObject({
       kind: 'service',
       category: 'Learn',
@@ -148,6 +264,23 @@ describe('toSharetribeAttrs', () => {
       accent: 'sky',
       storeId: 'store-1',
     });
+  });
+
+  it('drops a store id the caller does not own', () => {
+    const fields = {
+      kind: 'product',
+      title: 'Desk lamp',
+      description: 'Works well',
+      price: 12,
+      storeId: 'maya-makes-photo',
+    };
+    expect(toSharetribeAttrs(fields).publicData.storeId).toBeNull();
+    expect(
+      toSharetribeAttrs(fields, { ownedStoreIds: ['my-store'] }).publicData.storeId
+    ).toBeNull();
+    expect(
+      toSharetribeAttrs(fields, { ownedStoreIds: ['maya-makes-photo'] }).publicData.storeId
+    ).toBe('maya-makes-photo');
   });
 });
 
@@ -167,6 +300,65 @@ describe('stock', () => {
     const stock = { id: new UUID('stock-1'), type: 'stock', attributes: { quantity: 2 } };
     expect(toCampusListing(product, [...included, stock]).quantityAvailable).toBe(2);
     expect(toCampusListing(product, included).quantityAvailable).toBe(5);
+  });
+});
+
+describe('isRemovedListing', () => {
+  it('is true only after the seller deletes a listing', () => {
+    expect(isRemovedListing(listing)).toBe(false);
+    expect(
+      isRemovedListing({
+        attributes: { publicData: { ...listing.attributes.publicData, removed: true } },
+      })
+    ).toBe(true);
+  });
+});
+
+describe('listingImageSourceUrls', () => {
+  const image = (id, variants) => ({
+    id: new UUID(id),
+    type: 'image',
+    attributes: { variants },
+  });
+
+  it('keeps listing order and prefers the largest named variant', () => {
+    const source = {
+      ...listing,
+      relationships: {
+        images: {
+          data: [
+            { id: new UUID('img-1'), type: 'image' },
+            { id: new UUID('img-2'), type: 'image' },
+          ],
+        },
+      },
+    };
+    const urls = listingImageSourceUrls(source, [
+      image('img-1', {
+        'listing-card': { url: 'https://cdn.example/card.jpg', width: 400, height: 400 },
+        'scaled-xlarge': { url: 'https://cdn.example/large.jpg', width: 2400, height: 2400 },
+      }),
+      image('img-2', {
+        'listing-card': { url: 'https://cdn.example/second.jpg', width: 400, height: 400 },
+      }),
+    ]);
+    expect(urls).toEqual(['https://cdn.example/large.jpg', 'https://cdn.example/second.jpg']);
+  });
+
+  it('uses the biggest https variant when none of the named ones are present', () => {
+    const urls = listingImageSourceUrls(listing, [
+      image('img-1', {
+        thumb: { url: 'https://cdn.example/thumb.jpg', width: 80, height: 80 },
+        original: { url: 'https://cdn.example/original.jpg', width: 1600, height: 1200 },
+        insecure: { url: 'http://cdn.example/secret.jpg', width: 4000, height: 4000 },
+      }),
+    ]);
+    expect(urls).toEqual(['https://cdn.example/original.jpg']);
+  });
+
+  it('returns null when a photo cannot be copied', () => {
+    expect(listingImageSourceUrls(listing, included)).toEqual(['https://example.com/card.jpg']);
+    expect(listingImageSourceUrls(listing, [])).toEqual([null]);
   });
 });
 

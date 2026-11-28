@@ -37,6 +37,7 @@ router.post('/signup-with-google', asyncHandler(auth.signupWithGoogle));
 router.get('/listings', asyncHandler(listings.list));
 router.post('/listings', asyncHandler(listings.create));
 router.post('/listings/away', asyncHandler(listings.setAwayMode));
+router.get('/listings/:id/availability', asyncHandler(listings.availability));
 router.get('/listings/:id', asyncHandler(listings.show));
 router.patch('/listings/:id', asyncHandler(listings.update));
 router.post('/listings/:id/duplicate', asyncHandler(listings.duplicate));

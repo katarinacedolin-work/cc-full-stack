@@ -38,6 +38,14 @@ function photoSrc(path) {
   return path.split("/").map((part) => encodeURIComponent(part)).join("/");
 }
 
+/** Class tokens only, so a value cannot close the attribute. */
+function safeClass(value) {
+  return String(value ?? "")
+    .split(/\s+/)
+    .filter((token) => /^[A-Za-z][A-Za-z0-9_-]*$/.test(token))
+    .join(" ");
+}
+
 function cardPhotoImg(title) {
   const src = cardPhoto(title);
   if (!src) return "";
@@ -50,18 +58,19 @@ function cardPhotoImg(title) {
  */
 function framedMedia(tag, className, title, fallback = "", { before = "", after = "" } = {}) {
   const photo = cardPhotoImg(title);
-  return `<${tag} class="${className}${photo ? " has-photo" : ""}">${before}${photo || fallback}${after}</${tag}>`;
+  const classes = safeClass(`${className}${photo ? " has-photo" : ""}`);
+  return `<${tag} class="${classes}">${before}${photo || fallback}${after}</${tag}>`;
 }
 
 /** Initials, or the profile photo, inside `tag`. `attrs` is extra attributes such as aria-hidden. */
 function personMark(tag, className, initials, personId, attrs = "") {
   const extra = attrs ? ` ${attrs}` : "";
-  return `<${tag} class="${avatarClass(className, personId)}"${extra}>${avatarContents(initials, personId)}</${tag}>`;
+  return `<${tag} class="${safeClass(avatarClass(className, personId))}"${extra}>${avatarContents(initials, personId)}</${tag}>`;
 }
 
 /** Small checkout and order thumb: the card photo, or the emoji when there isn't one. */
 function cardThumb(title, accent, emoji) {
-  return framedMedia("div", `summary-thumb ${accent}`, title, emoji);
+  return framedMedia("div", `summary-thumb ${accentClass(accent)}`, title, emojiHtml(emoji));
 }
 
 const PROFILE_POOL = Object.values(PROFILE_PHOTOS);
@@ -101,7 +110,7 @@ function avatarContents(initials, personId) {
 }
 
 function storeBannerClass(store, className = "store-card-banner") {
-  return `${className} ${store.accent}${storePhoto(store.id) ? " has-photo" : ""}`;
+  return safeClass(`${className} ${accentClass(store?.accent)}${storePhoto(store.id) ? " has-photo" : ""}`);
 }
 
 /** The store picture, or the colored banner's usual contents when there isn't one. */
@@ -112,11 +121,11 @@ function storeBannerContents(store, fallback = "") {
 }
 
 function storeMarkClass(store) {
-  return `store-logo-small ${store.accent}${storePhoto(store.id) ? " has-photo" : ""}`;
+  return safeClass(`store-logo-small ${accentClass(store?.accent)}${storePhoto(store.id) ? " has-photo" : ""}`);
 }
 
 function storeMarkContents(store) {
   const src = storePhoto(store.id);
-  if (!src) return store.emoji;
+  if (!src) return emojiHtml(store.emoji);
   return `<img class="avatar-photo" src="${escapeHtml(src)}" alt="" />`;
 }
