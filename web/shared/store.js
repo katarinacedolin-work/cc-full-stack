@@ -130,6 +130,8 @@ const state = {
   booking: null,
   quantity: 1,
   checkoutEstimate: null,
+  pendingCheckout: null, // an order started at checkout but not yet paid, kept so a retry reuses it
+  checkoutFromOrder: null, // set when checkout was opened from an unpaid order, so Back returns to it
   config: null,
 
   /* Buyer: boards and settings. */

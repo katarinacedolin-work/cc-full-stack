@@ -8,6 +8,19 @@ const update = (changes) => (target) => {
   render();
 };
 
+/** Names one checkout (listing, slot and quantity), so a retry can find the order it already started. */
+const checkoutKeyFor = (listingId, date, time, quantity) => [listingId, date || "", time || "", quantity].join("|");
+
+/** Loads the public Stripe settings the first time checkout needs them. */
+async function ensureConfig() {
+  if (state.config) return;
+  try {
+    state.config = await api.getConfig();
+  } catch {
+    state.config = {};
+  }
+}
+
 const STORE_PAGE_DEFAULTS = { storeTab: "shop", storeCollection: "All", storeQuery: "", storeKind: "all" };
 const ACCOUNT_SETTING_LABELS = { notifyMessages: "Message notifications", notifyOrders: "Order notifications", notifyHousing: "Housing & subleases", profileVisible: "Profile visibility", showCampus: "Campus on your profile" };
 
@@ -116,13 +129,7 @@ Object.assign(ACTIONS, {
     if (listing?.kind === "service" && !(state.booking?.date && state.booking?.time)) {
       throw new Error("Pick a date and time first.");
     }
-    if (!state.config) {
-      try {
-        state.config = await api.getConfig();
-      } catch {
-        state.config = {};
-      }
-    }
+    await ensureConfig();
     let checkoutEstimate = null;
     try {
       checkoutEstimate = await api.estimateOrder({
@@ -134,37 +141,121 @@ Object.assign(ACTIONS, {
     } catch {
       checkoutEstimate = null;
     }
-    setView("checkout", { selectedListingId: listingId, checkoutEstimate });
-    await mountCheckoutCard(state.config?.stripePublishableKey);
+    // setView re-renders, and render() mounts the Stripe card itself; mounting here too would race it.
+    setView("checkout", { selectedListingId: listingId, checkoutEstimate, checkoutFromOrder: null });
   },
   "back-from-checkout": () => {
     unmountCardElement();
+    if (state.checkoutFromOrder) {
+      return setView("order", { selectedOrderId: state.checkoutFromOrder, checkoutFromOrder: null, checkoutEstimate: null });
+    }
     setView("listing", { checkoutEstimate: null });
+  },
+  /**
+   * Finishes paying for an order that was started but not paid, for example after a reload. The
+   * order and its PaymentIntent already exist, so this never starts a second charge.
+   */
+  "resume-payment": async (target) => {
+    const { order, clientSecret } = await api.getOrderForPayment(target.dataset.id);
+    if (order.status !== "pending-payment") {
+      await refresh("orders");
+      return setView("order", { selectedOrderId: order.id });
+    }
+    await ensureConfig();
+    const publishableKey = state.config?.stripePublishableKey;
+    if (!publishableKey) throw new Error("Checkout is not configured yet. Add a Stripe publishable key.");
+    if (!clientSecret) throw new Error("This payment cannot be resumed. Start a new order from the listing.");
+
+    const intentStatus = await getPaymentIntentStatus(publishableKey, clientSecret);
+    if (intentStatus === "requires_capture" || intentStatus === "succeeded") {
+      // The card was already charged and only the order was left unconfirmed, so no card is needed.
+      const confirmed = await api.confirmOrderPayment(order.id);
+      if (state.pendingCheckout?.transactionId === order.id) state.pendingCheckout = null;
+      await load("orders", "listings");
+      setView("order", { selectedOrderId: confirmed.id });
+      showToast("Payment received. Your order is in.");
+      return;
+    }
+    if (intentStatus === "processing") throw new Error("Your payment is still processing. Check back in a moment.");
+    if (intentStatus === "canceled") {
+      await refresh("orders");
+      throw new Error("This payment expired. Start a new order from the listing.");
+    }
+
+    if (!getListing(order.listingId)) throw new Error("That listing is no longer available.");
+    const quantity = order.quantity || 1;
+    // The card from the first attempt is not usable any more, so it has to be entered again.
+    state.pendingCheckout = {
+      key: checkoutKeyFor(order.listingId, order.date, order.time, quantity),
+      transactionId: order.id,
+      clientSecret,
+      attempted: true,
+      paid: false
+    };
+    setView("checkout", {
+      selectedListingId: order.listingId,
+      quantity,
+      booking: order.date ? { date: order.date, time: order.time } : null,
+      checkoutEstimate: { payinTotal: order.total },
+      checkoutFromOrder: order.id
+    });
   },
   "confirm-order": async (target) => {
     const listingId = target.dataset.id;
     const publishableKey = state.config?.stripePublishableKey;
     if (!publishableKey) throw new Error("Checkout is not configured yet. Add a Stripe publishable key.");
 
-    const paymentMethodId = await createCardPaymentMethod(publishableKey, {
+    const billingDetails = {
       name: data.account.displayName || undefined,
       email: data.session.email || undefined
-    });
+    };
     const { date, time } = state.booking || {};
-    const payload = await api.placeOrder({
-      listingId,
-      date,
-      time,
-      quantity: state.quantity,
-      paymentMethodId
-    });
-    if (payload.clientSecret) {
-      await confirmCardPayment(publishableKey, payload.clientSecret);
+    const checkoutKey = checkoutKeyFor(listingId, date, time, state.quantity);
+
+    // A charged order that was never confirmed has to be finished before buying anything else.
+    if (state.pendingCheckout?.paid && state.pendingCheckout.key !== checkoutKey) {
+      throw new Error(
+        "You already paid for another order that is not confirmed yet. Finish that checkout first."
+      );
     }
-    const order = await api.confirmOrderPayment(payload.transactionId || payload.order?.id);
+
+    // A failed attempt leaves its order waiting for payment. Retrying the same checkout finishes
+    // that order instead of starting a second one, so the buyer is never charged twice.
+    let pending = state.pendingCheckout?.key === checkoutKey ? state.pendingCheckout : null;
+    if (!pending) {
+      const paymentMethodId = await createCardPaymentMethod(publishableKey, billingDetails);
+      const payload = await api.placeOrder({
+        listingId,
+        date,
+        time,
+        quantity: state.quantity,
+        paymentMethodId
+      });
+      pending = {
+        key: checkoutKey,
+        transactionId: payload.transactionId || payload.order?.id,
+        clientSecret: payload.clientSecret || null,
+        attempted: false,
+        paid: !payload.clientSecret
+      };
+      state.pendingCheckout = pending;
+    }
+    if (!pending.paid) {
+      const retryWithCard = pending.attempted;
+      pending.attempted = true;
+      pending.busy = true;
+      try {
+        await confirmCardPayment(publishableKey, pending.clientSecret, { retryWithCard, billingDetails });
+        pending.paid = true;
+      } finally {
+        pending.busy = false;
+      }
+    }
+    const order = await api.confirmOrderPayment(pending.transactionId);
+    state.pendingCheckout = null;
     unmountCardElement();
     await load("orders", "listings");
-    setView("order", { selectedOrderId: order.id, checkoutEstimate: null });
+    setView("order", { selectedOrderId: order.id, checkoutEstimate: null, checkoutFromOrder: null });
     showToast("Payment received. Your order is in.");
   },
   "open-order": (target) => setView("order", { selectedOrderId: target.dataset.id }),

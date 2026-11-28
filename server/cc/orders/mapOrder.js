@@ -21,13 +21,13 @@ const statusFromTransaction = (tx, { readyForPickup = false } = {}) => {
   const last = tx.attributes?.lastTransition || '';
   const processName = (tx.attributes?.processName || '').split('/')[0];
 
-  if (
-    /cancel|decline|expire-payment|expire$|auto-cancel/i.test(last) &&
-    !/from-disputed|review/i.test(last)
-  ) {
+  // Resolutions out of a dispute (cancel-from-disputed, auto-cancel-from-disputed) are cancellations.
+  if (/cancel|decline|expire-payment|expire$|auto-cancel/i.test(last) && !/review/i.test(last)) {
     return 'cancelled';
   }
-  if (/dispute/i.test(last) && !/from-disputed|mark-received-from-disputed/i.test(last)) {
+  // Only the transition that enters the dispute state counts as disputed; mark-received-from-disputed
+  // falls through to 'completed' below.
+  if (/dispute/i.test(last) && !/from-disputed/i.test(last)) {
     return 'disputed';
   }
   if (/complete|mark-received|auto-mark-received|review/i.test(last)) {
@@ -49,6 +49,27 @@ const statusFromTransaction = (tx, { readyForPickup = false } = {}) => {
     if (/request-payment/i.test(last)) return 'pending-payment';
   }
   return 'confirmed';
+};
+
+// Questions asked before buying, and payments that timed out, are never orders.
+const NEVER_AN_ORDER = /transition\/(inquire|expire-payment)$/;
+// A checkout that was started but not paid yet.
+const AWAITING_PAYMENT = /transition\/(request-payment|request-payment-after-inquiry)$/;
+
+/**
+ * Whether a transaction belongs in one person's list of orders. A checkout still waiting for
+ * payment shows for the buyer, who can finish paying (Sharetribe expires it after 15 minutes),
+ * but not for the seller, who has nothing to act on until it is paid.
+ *
+ * @param {Object} tx Sharetribe transaction
+ * @param {'customer'|'provider'} role The side of the order whose list this is
+ * @returns {boolean}
+ */
+const isListedOrder = (tx, role) => {
+  const last = tx.attributes?.lastTransition || '';
+  if (NEVER_AN_ORDER.test(last)) return false;
+  if (AWAITING_PAYMENT.test(last)) return role === 'customer';
+  return true;
 };
 
 const personFrom = (ref, included = []) => {
@@ -156,8 +177,8 @@ exports.toCampusOrder = (tx, included = [], flags = {}) => {
   const last = order.lastTransition || '';
   if (kind === 'product') {
     if (/confirm-payment/i.test(last)) {
+      // The buyer can only confirm receipt once the seller marks the item ready/delivered.
       order.can.markDelivered = true;
-      order.can.markReceived = true;
       order.can.cancel = true;
     }
     if (/mark-delivered/i.test(last) || flags.readyForPickup) {
@@ -210,3 +231,4 @@ exports.BOOKING_PROCESS = BOOKING_PROCESS;
 exports.PURCHASE_PROCESS = PURCHASE_PROCESS;
 exports.kindFromProcess = kindFromProcess;
 exports.statusFromTransaction = statusFromTransaction;
+exports.isListedOrder = isListedOrder;

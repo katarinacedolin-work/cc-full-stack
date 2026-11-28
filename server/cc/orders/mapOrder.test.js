@@ -1,5 +1,5 @@
 const { types } = require('sharetribe-flex-sdk');
-const { toCampusOrder, statusFromTransaction } = require('./mapOrder');
+const { toCampusOrder, statusFromTransaction, isListedOrder } = require('./mapOrder');
 
 const { UUID, Money } = types;
 
@@ -93,6 +93,50 @@ describe('statusFromTransaction', () => {
       })
     ).toBe('requested');
   });
+
+  it.each([
+    ['transition/dispute', 'disputed'],
+    ['transition/cancel-from-disputed', 'cancelled'],
+    ['transition/auto-cancel-from-disputed', 'cancelled'],
+    ['transition/mark-received-from-disputed', 'completed'],
+  ])('maps %s to %s', (lastTransition, expected) => {
+    expect(
+      statusFromTransaction({ attributes: { processName: 'default-purchase', lastTransition } })
+    ).toBe(expected);
+  });
+});
+
+describe('isListedOrder', () => {
+  const last = lastTransition => ({ attributes: { lastTransition } });
+
+  it.each([
+    'transition/request-payment',
+    'transition/request-payment-after-inquiry',
+  ])('shows an unpaid checkout (%s) to the buyer but not the seller', transition => {
+    expect(isListedOrder(last(transition), 'customer')).toBe(true);
+    expect(isListedOrder(last(transition), 'provider')).toBe(false);
+  });
+
+  it.each(['transition/inquire', 'transition/expire-payment'])(
+    'never lists %s',
+    transition => {
+      expect(isListedOrder(last(transition), 'customer')).toBe(false);
+      expect(isListedOrder(last(transition), 'provider')).toBe(false);
+    }
+  );
+
+  it.each(['transition/confirm-payment', 'transition/accept', 'transition/mark-received'])(
+    'lists a paid order (%s) for both sides',
+    transition => {
+      expect(isListedOrder(last(transition), 'customer')).toBe(true);
+      expect(isListedOrder(last(transition), 'provider')).toBe(true);
+    }
+  );
+
+  it('maps an unpaid checkout to the pending-payment status', () => {
+    const unpaid = tx({ attributes: { lastTransition: 'transition/request-payment' } });
+    expect(toCampusOrder(unpaid, included).status).toBe('pending-payment');
+  });
 });
 
 describe('toCampusOrder', () => {
@@ -109,8 +153,12 @@ describe('toCampusOrder', () => {
       seller: 'Maya Chen',
       title: 'Desk lamp',
       note: 'Meet at the library',
-      can: expect.objectContaining({ markDelivered: true, markReceived: true, cancel: true }),
+      can: expect.objectContaining({ markDelivered: true, markReceived: false, cancel: true }),
     });
+  });
+
+  it('lets the buyer confirm receipt only after the seller marks it ready', () => {
+    expect(toCampusOrder(tx(), included, { readyForPickup: true }).can.markReceived).toBe(true);
   });
 
   it('shows a booking as a campus date and clock', () => {

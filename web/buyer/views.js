@@ -142,7 +142,7 @@ function categoryChips(kind = "all") {
 function homeView() {
   const shelf = allListings().filter((listing) => !isChoreListing(listing) && !listing.storeOnly);
   const popular = shelf.filter((listing) => listing.kind !== "ticket").sort((a, b) => b.reviews + b.completed - (a.reviews + a.completed)).slice(0, 8);
-  const booked = [...new Set(data.orders.map((order) => order.listingId))].map(getListing).filter(Boolean);
+  const booked = [...new Set(placedOrders().map((order) => order.listingId))].map(getListing).filter(Boolean);
   const bookAgain = [...booked, ...shelf.filter((listing) => listing.kind === "service" && !booked.includes(listing))].slice(0, 8);
   const featuredStores = [...data.stores].sort((a, b) => b.followers - a.followers).slice(0, 8);
   const shown = new Set([...popular, ...bookAgain]);
@@ -390,7 +390,7 @@ function checkoutView(listing) {
       ? `<div class="step"><span class="step-number">2</span><div><strong>${escapeHtml(ticketSchedule(listing))}</strong><p>${escapeHtml(ticketHost(listing))}</p></div></div><div class="step"><span class="step-number">3</span><div><strong>Your QR code</strong><p>It shows up as soon as you pay. They scan it once at the door.</p></div></div>`
       : `<div class="step"><span class="step-number">2</span><div><strong>${plural(quantity, "item")}</strong><p>${escapeHtml(listing.availability)} · ${escapeHtml(listing.meeting)}</p></div></div><div class="step"><span class="step-number">3</span><div><strong>Campus pickup</strong><p>The seller will mark the order ready, then you confirm you got it.</p></div></div>`;
   const priceLine = listing.price ? `${ticket ? ticketPriceLabel(listing.price) : money(listing.price)}${service ? ` / ${escapeHtml(listing.unit)}` : ticket ? "" : " each"}` : "Free";
-  return `<div class="page-top-row"><button class="back-button" data-action="back-from-checkout">${icon("chevron-left")} Back to listing</button><span class="small muted">Secure checkout · Stripe</span></div>
+  return `<div class="page-top-row"><button class="back-button" data-action="back-from-checkout">${icon("chevron-left")} Back to ${state.checkoutFromOrder ? "order" : "listing"}</button><span class="small muted">Secure checkout · Stripe</span></div>
     <div class="checkout-layout"><section class="checkout-panel"><div class="eyebrow">${ticket ? escapeHtml(ticketHost(listing)) : service ? "Book" : "Shop"}</div><h1>${ticket ? "Review your ticket." : service ? "Review your booking." : "Review your order."}</h1><p class="lede">${ticket ? "One purchase, one QR code. Bring it to the door." : service ? "Make sure the time and price look right before you pay." : "Make sure the seller, quantity and pickup details look right before you pay."}</p>
       <div class="step-list">
         <div class="step"><span class="step-number">1</span><div><strong>${escapeHtml(listing.title)}</strong><p>${escapeHtml(ticket ? ticketHost(listing) : listing.seller)} · ${priceLine}</p></div></div>
@@ -416,12 +416,14 @@ function ticketPass(order, listing) {
 }
 
 const BUYER_ORDER_STATUS = {
-  service: { requested: "Awaiting confirmation", confirmed: "Upcoming", completed: "Completed", cancelled: "Cancelled", disputed: "Problem reported" },
-  product: { requested: "Awaiting confirmation", confirmed: "Paid", ready: "Ready for pickup", completed: "Picked up", cancelled: "Cancelled", disputed: "Problem reported" },
-  ticket: { confirmed: "Valid", completed: "Used" },
+  service: { "pending-payment": "Payment needed", requested: "Awaiting confirmation", confirmed: "Upcoming", completed: "Completed", cancelled: "Cancelled", disputed: "Problem reported" },
+  product: { "pending-payment": "Payment needed", requested: "Awaiting confirmation", confirmed: "Paid", ready: "Ready for pickup", completed: "Picked up", cancelled: "Cancelled", disputed: "Problem reported" },
+  ticket: { "pending-payment": "Payment needed", confirmed: "Valid", completed: "Used" },
   chore: { paid: "Paid on Campus Connect" }
 };
 const buyerOrderStatus = (order) => BUYER_ORDER_STATUS[order.kind]?.[order.status] || order.status;
+/** Orders that are actually placed. A checkout still waiting for payment is listed, but is not an order yet. */
+const placedOrders = () => data.orders.filter((order) => order.status !== "pending-payment");
 const buyerOrderWhen = (order) => (order.date ? slotLabel(order) : order.note || "");
 
 function orderView(order) {
@@ -432,53 +434,60 @@ function orderView(order) {
       <div class="order-success"><div class="success-mark">${icon("check")}</div><div class="eyebrow">Paid on Campus Connect</div><h1>${escapeHtml(order.payer)} paid ${escapeHtml(order.payee)}.</h1><p class="lede">${dollars(order.total)} for ${escapeHtml(order.title)} stayed on the platform.</p><div class="order-detail-card"><div class="order-detail-row"><span>Chore</span><strong>${escapeHtml(order.title)}</strong></div><div class="order-detail-row"><span>When</span><strong>${escapeHtml(order.note)}</strong></div><div class="order-detail-row"><span>Paid to</span><strong>${escapeHtml(order.payee)}</strong></div></div><div class="button-row"><button class="primary-button" data-view="you">View activity</button><button class="ghost-button" data-action="open-chore-board">Back to the board</button></div></div>`;
   }
   const listing = getListing(order.listingId);
-  if (order.kind === "ticket") {
+  if (order.kind === "ticket" && order.status !== "pending-payment") {
     return `<div class="page-top-row">${backToYou}<button class="ghost-button" data-view="tickets">More tickets</button></div>
       <div class="order-success ticket-order"><div class="eyebrow">Ticket</div><h1>${order.ticketStatus === "used" ? "This ticket has been used." : "Your ticket is ready."}</h1><p class="lede">${escapeHtml(listing?.seller || "The seller")} scans the code at the door.</p>${ticketPass(order, listing)}</div>`;
   }
   const service = order.kind === "service";
+  const unpaid = order.status === "pending-payment";
   const cancelled = order.status === "cancelled";
   const disputed = order.status === "disputed";
   const waiting = order.status === "requested";
   const ready = order.status === "ready";
   const completed = order.status === "completed";
-  const eyebrow = cancelled
-    ? "Cancelled"
-    : disputed
-      ? "Problem reported"
-      : completed
-        ? "Completed"
-        : ready
-          ? "Ready for pickup"
-          : !service
-            ? "Order placed"
+  const eyebrow = unpaid
+    ? "Payment needed"
+    : cancelled
+      ? "Cancelled"
+      : disputed
+        ? "Problem reported"
+        : completed
+          ? "Completed"
+          : ready
+            ? "Ready for pickup"
+            : !service
+              ? "Order placed"
+              : waiting
+                ? "Booking requested"
+                : "Booking confirmed";
+  const heading = unpaid
+    ? "Finish paying to place this order."
+    : cancelled
+      ? "This one was cancelled."
+      : disputed
+        ? "Support has this one."
+        : completed
+          ? "All done."
+          : ready
+            ? "Ready when you are."
+            : !service
+              ? "That one is yours."
+              : waiting
+                ? "Your request is in."
+                : "You are on the calendar.";
+  const lede = unpaid
+    ? "Your payment did not go through yet, so the seller has not seen this order. Unpaid orders expire on their own after about 15 minutes."
+    : cancelled
+      ? order.cancelReason || "The seller cancelled this order."
+      : disputed
+        ? "Your report is linked to this order. Keep payments and messages on Campus Connect."
+        : completed
+          ? "Pickup is confirmed. You can leave a review for the seller."
+          : ready
+            ? "The seller marked this ready. Confirm when you have it, or report a problem."
             : waiting
-              ? "Booking requested"
-              : "Booking confirmed";
-  const heading = cancelled
-    ? "This one was cancelled."
-    : disputed
-      ? "Support has this one."
-      : completed
-        ? "All done."
-        : ready
-          ? "Ready when you are."
-          : !service
-            ? "That one is yours."
-            : waiting
-              ? "Your request is in."
-              : "You are on the calendar.";
-  const lede = cancelled
-    ? order.cancelReason || "The seller cancelled this order."
-    : disputed
-      ? "Your report is linked to this order. Keep payments and messages on Campus Connect."
-      : completed
-        ? "Pickup is confirmed. You can leave a review for the seller."
-        : ready
-          ? "The seller marked this ready. Confirm when you have it, or report a problem."
-          : waiting
-            ? "The seller has your request. You will get a notification when they answer."
-            : "It is saved in your activity, and updates show up in your notifications.";
+              ? "The seller has your request. You will get a notification when they answer."
+              : "It is saved in your activity, and updates show up in your notifications.";
   const rows = [
     [service ? "Service" : "Product", listing?.title || "Campus Connect listing"],
     service ? ["When", buyerOrderWhen(order)] : ["Quantity", order.quantity || order.qty || 1],
@@ -489,6 +498,9 @@ function orderView(order) {
 
   const can = order.can || {};
   const actionButtons = [];
+  if (unpaid) {
+    actionButtons.push(`<button class="primary-button" data-action="resume-payment" data-id="${order.id}">Finish payment ${icon("arrow")}</button>`);
+  }
   if (!service && can.markReceived && !cancelled && !disputed && !completed) {
     actionButtons.push(`<button class="primary-button" data-action="got-it" data-id="${order.id}">${icon("check")} Got it</button>`);
   }
@@ -507,7 +519,7 @@ function orderView(order) {
   }
 
   return `<div class="page-top-row">${backToYou}${listing ? `<button class="ghost-button" data-action="message-seller" data-seller="${listing.sellerId}" data-listing="${listing.id}">${icon("chat")} Message seller</button>` : ""}</div>
-    <div class="order-success">${cancelled || disputed ? "" : `<div class="success-mark">${icon("check")}</div>`}<div class="eyebrow">${eyebrow}</div><h1>${heading}</h1><p class="lede">${escapeHtml(lede)}</p><div class="order-detail-card">${rows}</div><div class="button-row">${actionButtons.join("")}</div></div>`;
+    <div class="order-success">${cancelled || disputed || unpaid ? "" : `<div class="success-mark">${icon("check")}</div>`}<div class="eyebrow">${eyebrow}</div><h1>${heading}</h1><p class="lede">${escapeHtml(lede)}</p><div class="order-detail-card">${rows}</div><div class="button-row">${actionButtons.join("")}</div></div>`;
 }
 
 /* ---------- Sellers and stores ---------- */
@@ -884,7 +896,7 @@ function ticketChat() {
 function ticketsView() {
   const storeTickets = allListings().filter((listing) => listing.kind === "ticket" && listing.quantityAvailable > 0);
   const cards = storeTickets.length ? storeTickets.map(listingCard).join("") : `<p class="muted">No tickets are on sale right now.</p>`;
-  const mine = data.orders.filter((order) => order.kind === "ticket");
+  const mine = placedOrders().filter((order) => order.kind === "ticket");
   const owned = mine.length
     ? `<section class="section"><div class="section-header"><h2>Your tickets</h2></div><div class="activity-list">${mine.map((order) => {
       const listing = getListing(order.listingId);
@@ -1180,7 +1192,7 @@ function youView() {
     return `<button class="activity-row" data-action="open-order" data-id="${order.id}"><span class="activity-main"><span class="activity-thumb ${accentClass(order.accent || listing?.accent, "lilac")}">${emojiHtml(order.emoji || listing?.emoji, "✦")}</span><span><span class="activity-title">${escapeHtml(order.title || listing?.title || "Campus Connect order")}</span><span class="activity-sub">${escapeHtml([buyerOrderStatus(order), buyerOrderWhen(order)].filter(Boolean).join(" · "))}</span></span></span>${icon("chevron-right")}</button>`;
   }).join("");
   return `<div class="page-top-row"><div><div class="eyebrow">Your campus activity</div><h1 style="margin-bottom: 6px">You</h1></div><button class="ghost-button" data-view="settings">${icon("settings")} Settings</button></div>
-  <section class="seller-hero profile-hero"><div class="seller-hero-main">${personMark("div", "seller-avatar", initialsOf(name), myId())}<div>${studentVerifiedPill()}<h2>${escapeHtml(name)}</h2>${data.account.showCampus ? `<p class="muted">SDSU</p>` : ""}<div class="seller-stats"><span><strong>${data.orders.length}</strong> orders</span><span><strong>${data.conversations.length}</strong> messages</span></div></div></div></section>
+  <section class="seller-hero profile-hero"><div class="seller-hero-main">${personMark("div", "seller-avatar", initialsOf(name), myId())}<div>${studentVerifiedPill()}<h2>${escapeHtml(name)}</h2>${data.account.showCampus ? `<p class="muted">SDSU</p>` : ""}<div class="seller-stats"><span><strong>${placedOrders().length}</strong> orders</span><span><strong>${data.conversations.length}</strong> messages</span></div></div></div></section>
   <section class="profile-layout">
     <div class="profile-orders-panel">
       <div class="section-header profile-orders-header"><div><div class="eyebrow">Your activity</div><h2>Orders & bookings</h2></div></div>

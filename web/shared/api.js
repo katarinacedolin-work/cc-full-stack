@@ -543,6 +543,15 @@ const api = (() => {
       return payload;
     },
 
+    /**
+     * One of the buyer's own orders. While it is still waiting for payment, the reply also has
+     * the Stripe `clientSecret` needed to finish paying, for example after a reload.
+     */
+    getOrderForPayment: async (orderId) => {
+      const { order, clientSecret } = await ccFetch(`/orders/${encodeURIComponent(orderId)}`);
+      return { order, clientSecret: clientSecret || null };
+    },
+
     confirmOrderPayment: async (orderId) => {
       const { order } = await ccFetch(`/orders/${encodeURIComponent(orderId)}/confirm-payment`, {
         method: "POST",

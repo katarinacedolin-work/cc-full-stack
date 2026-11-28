@@ -16,7 +16,12 @@ const { httpError } = require('../auth/httpError');
 const log = require('../../log');
 const db = require('../db');
 const { parseSlot, durationMinutes } = require('../time');
-const { toCampusOrder, BOOKING_PROCESS, PURCHASE_PROCESS } = require('../orders/mapOrder');
+const {
+  toCampusOrder,
+  isListedOrder,
+  BOOKING_PROCESS,
+  PURCHASE_PROCESS,
+} = require('../orders/mapOrder');
 
 const { UUID } = types;
 
@@ -43,6 +48,13 @@ const sharetribeMessage = (error, fallback) => {
   const first = error?.data?.errors?.[0];
   return first?.title || first?.detail || fallback;
 };
+
+// Sharetribe answers 409 when the requested transition isn't allowed from the current state
+// (already moved on, or not part of the process). Anything else is a real failure.
+const TRANSITION_NOT_ALLOWED_CODES = ['transaction-invalid-transition'];
+const isTransitionNotAllowed = error =>
+  error?.status === 409 &&
+  (error?.data?.errors || []).some(err => TRANSITION_NOT_ALLOWED_CODES.includes(err?.code));
 
 const processAliasFor = listing => {
   const fromListing = listing.attributes?.publicData?.transactionProcessAlias;
@@ -102,9 +114,6 @@ const stripeClientSecret = tx =>
   tx.attributes?.protectedData?.stripePaymentIntents?.default?.stripePaymentIntentClientSecret ||
   null;
 
-// Checkouts that were started but never paid, and questions asked before buying, aren't orders.
-const NOT_AN_ORDER = /transition\/(inquire|request-payment|request-payment-after-inquiry|expire-payment)$/;
-
 const getFlagsFor = async transactionIds => {
   const flags = new Map();
   if (transactionIds.length === 0) return flags;
@@ -135,9 +144,7 @@ exports.list = async (req, res) => {
     perPage: 100,
   });
   const included = response.data.included || [];
-  const transactions = response.data.data.filter(
-    tx => !NOT_AN_ORDER.test(tx.attributes.lastTransition || '')
-  );
+  const transactions = response.data.data.filter(tx => isListedOrder(tx, role));
   const flags = await getFlagsFor(transactions.map(tx => tx.id.uuid));
   const orders = transactions.map(tx => toCampusOrder(tx, included, flags.get(tx.id.uuid)));
   orders.sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')));
@@ -146,6 +153,8 @@ exports.list = async (req, res) => {
 
 /**
  * GET /api/cc/orders/:id
+ * When the buyer opens an order that is still waiting for payment, the response also carries the
+ * Stripe client secret, so they can finish paying after a reload. The seller never gets it.
  */
 exports.show = async (req, res) => {
   const { sdk, user } = await requireUser(req, res);
@@ -153,7 +162,13 @@ exports.show = async (req, res) => {
     const { tx, included } = await loadTransaction(sdk, req.params.id);
     assertParticipant(tx, user.id.uuid, 'either');
     const flags = await getFlagsOrNone(tx.id.uuid);
-    res.json({ order: toCampusOrder(tx, included, flags) });
+    const order = toCampusOrder(tx, included, flags);
+    const isBuyer = tx.relationships?.customer?.data?.id?.uuid === user.id.uuid;
+    if (isBuyer && order.status === 'pending-payment') {
+      res.json({ order, clientSecret: stripeClientSecret(tx) });
+      return;
+    }
+    res.json({ order });
   } catch (e) {
     if (e.status && e.code) throw e;
     throw httpError(404, 'order-not-found', 'That order is no longer here.');
@@ -336,7 +351,19 @@ exports.action = async (req, res) => {
 
   if (action === 'mark-received') {
     const last = tx.attributes.lastTransition || '';
-    transition = /mark-delivered/i.test(last)
+    const delivered = /mark-delivered/i.test(last);
+    // Receipt releases the seller's payout, so it needs the seller to have marked the item ready.
+    if (!delivered) {
+      const flags = await getFlagsOrNone(tx.id.uuid);
+      if (!flags.readyForPickup) {
+        throw httpError(
+          400,
+          'not-ready',
+          'The seller has not marked this order ready for pickup yet.'
+        );
+      }
+    }
+    transition = delivered
       ? 'transition/mark-received'
       : 'transition/mark-received-from-purchased';
   }
@@ -386,13 +413,18 @@ exports.action = async (req, res) => {
       res.json({ order: toCampusOrder(response.data.data, response.data.included || []) });
       return;
     } catch (e) {
+      // Only fall back to the second review when review-1 isn't available from the current state
+      // (the other party already reviewed). Timeouts, 5xx and validation errors must surface as-is,
+      // otherwise review-2 fails from the wrong state and masks the real error.
+      if (!isTransitionNotAllowed(e)) {
+        throw httpError(
+          e.status || 400,
+          'action-failed',
+          sharetribeMessage(e, 'Could not submit your review.')
+        );
+      }
       transition = second;
     }
-  }
-
-  if (action === 'mark-delivered') {
-    // Also set the ready-for-pickup flag used by the Seller Hub UI.
-    await setReadyFlag(tx.id.uuid, true);
   }
 
   try {
@@ -400,6 +432,11 @@ exports.action = async (req, res) => {
       { id: tx.id, transition, params },
       TX_INCLUDE
     );
+    if (action === 'mark-delivered') {
+      // Also set the ready-for-pickup flag used by the Seller Hub UI, only after the transition
+      // actually succeeded so the flag never gets ahead of the transaction state.
+      await setReadyFlag(tx.id.uuid, true).catch(e => log.error(e, 'cc-order-flags-failed'));
+    }
     const flags = await getFlagsOrNone(tx.id.uuid);
     res.json({ order: toCampusOrder(response.data.data, response.data.included || [], flags) });
   } catch (e) {
@@ -419,7 +456,36 @@ exports.readyForPickup = async (req, res) => {
   const { sdk, user } = await requireUser(req, res);
   const { tx, included } = await loadTransaction(sdk, req.params.id);
   assertParticipant(tx, user.id.uuid, 'provider');
-  await setReadyFlag(tx.id.uuid, true);
+
+  // Prefer transitioning to mark-delivered when the process allows it. The ready flag is only
+  // written once we know the order state is consistent with it, so a timeout or other real
+  // Sharetribe failure never leaves the DB saying "ready" while the transaction is still purchased.
+  let order;
+  try {
+    const response = await sdk.transactions.transition(
+      { id: tx.id, transition: 'transition/mark-delivered', params: {} },
+      TX_INCLUDE
+    );
+    await setReadyFlag(tx.id.uuid, true);
+    order = toCampusOrder(response.data.data, response.data.included || [], {
+      readyForPickup: true,
+    });
+  } catch (e) {
+    if (!isTransitionNotAllowed(e)) {
+      // Transient or unknown failure: let the client retry instead of faking success.
+      log.error(e, 'cc-ready-for-pickup-failed');
+      throw httpError(
+        e.status || 500,
+        'action-failed',
+        sharetribeMessage(e, 'Could not mark that order ready. Please try again.')
+      );
+    }
+    // The transition isn't available (e.g. already delivered, or the process has no such
+    // transition), so the seller notice alone is the intended outcome.
+    await setReadyFlag(tx.id.uuid, true);
+    order = toCampusOrder(tx, included, { readyForPickup: true });
+  }
+
   try {
     await sdk.messages.send({
       transactionId: tx.id,
@@ -428,27 +494,66 @@ exports.readyForPickup = async (req, res) => {
   } catch (e) {
     // Non-fatal.
   }
-  // Prefer transitioning to mark-delivered when the process allows it.
-  try {
-    const response = await sdk.transactions.transition(
-      { id: tx.id, transition: 'transition/mark-delivered', params: {} },
-      TX_INCLUDE
-    );
-    res.json({
-      order: toCampusOrder(response.data.data, response.data.included || [], {
-        readyForPickup: true,
-      }),
-    });
-  } catch (e) {
-    const flags = { readyForPickup: true };
-    res.json({ order: toCampusOrder(tx, included, flags) });
+  res.json({ order });
+};
+
+const OPERATOR_TEXT_MAX = 1000;
+
+/**
+ * Decides whether the provider may trigger an operator-only transition right now.
+ * These transitions run with Integration API credentials (payout, full refund), so the order's
+ * state and timing must be verified here; the caller being the provider is not enough.
+ *
+ * @param {Object} tx Sharetribe transaction
+ * @param {Object} [booking] Included booking entity
+ * @param {string} processName Process name without the alias/version
+ * @param {string} action 'cancel' | 'complete'
+ * @returns {string} The transition to run
+ * @throws {Error} httpError when the action is not allowed
+ */
+const operatorTransitionFor = (tx, booking, processName, action) => {
+  const last = tx.attributes?.lastTransition || '';
+
+  if (action === 'complete') {
+    // Completing releases the payout, so it only makes sense for an accepted booking whose
+    // session has already ended. Purchases are completed by the buyer confirming receipt.
+    if (processName !== BOOKING_PROCESS) {
+      throw httpError(
+        400,
+        'operator-action-not-allowed',
+        'The buyer confirms receipt to complete this order.'
+      );
+    }
+    if (last !== 'transition/accept') {
+      throw httpError(409, 'wrong-order-state', 'This order is not ready to be completed.');
+    }
+    const end = booking?.attributes?.end;
+    const endTime = end ? new Date(end).getTime() : NaN;
+    if (!Number.isFinite(endTime) || endTime > Date.now()) {
+      throw httpError(
+        409,
+        'session-not-finished',
+        'You can complete a booking after the session has ended.'
+      );
+    }
+    return 'transition/operator-complete';
   }
+
+  // Cancel issues a full refund, so it is only allowed before the order is fulfilled.
+  const cancellable =
+    processName === BOOKING_PROCESS
+      ? last === 'transition/accept'
+      : processName === PURCHASE_PROCESS && last === 'transition/confirm-payment';
+  if (!cancellable) {
+    throw httpError(409, 'wrong-order-state', 'This order can no longer be cancelled.');
+  }
+  return 'transition/cancel';
 };
 
 /**
  * POST /api/cc/orders/:id/operator/:action
  * Seller-facing buttons that only the operator can run in default processes.
- * Actions: cancel, complete
+ * Actions: cancel, complete (bookings only, after the session has ended)
  */
 exports.operatorAction = async (req, res) => {
   const { sdk, user } = await requireUser(req, res);
@@ -457,30 +562,28 @@ exports.operatorAction = async (req, res) => {
 
   const processName = (tx.attributes.processName || '').split('/')[0];
   const action = req.params.action;
-  let transition;
-  if (action === 'cancel') {
-    transition = 'transition/cancel';
-  } else if (action === 'complete') {
-    transition =
-      processName === BOOKING_PROCESS
-        ? 'transition/operator-complete'
-        : 'transition/operator-mark-delivered';
-  } else {
+  if (action !== 'cancel' && action !== 'complete') {
     throw httpError(400, 'unknown-action', 'That operator action is not supported.');
   }
+  const booking = included.find(entity => entity.type === 'booking');
+  const transition = operatorTransitionFor(tx, booking, processName, action);
 
-  const reason = String(req.body?.reason || '').trim();
-  const message = String(req.body?.message || '').trim();
+  const reason = String(req.body?.reason || '')
+    .trim()
+    .slice(0, OPERATOR_TEXT_MAX);
+  const message = String(req.body?.message || '')
+    .trim()
+    .slice(0, OPERATOR_TEXT_MAX);
 
   try {
     const integrationSdk = getIntegrationSdk();
+    // transition/cancel and transition/operator-complete have no
+    // :action/update-protected-data, so passing protectedData would be rejected by Sharetribe.
+    // The message is delivered to the customer as a chat message below instead.
     await integrationSdk.transactions.transition({
       id: tx.id,
       transition,
-      params:
-        reason || message
-          ? { protectedData: { operatorReason: reason, operatorMessage: message } }
-          : {},
+      params: {},
     });
   } catch (e) {
     throw httpError(

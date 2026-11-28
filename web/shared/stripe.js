@@ -58,8 +58,25 @@ function unmountCardElement() {
  * Mounts the Card Element into #stripe-card-element when present.
  * Call after every render while the checkout view is open.
  */
-async function mountCheckoutCard(publishableKey) {
+function mountCheckoutCard(publishableKey) {
   const mount = document.querySelector("#stripe-card-element");
+  // Concurrent calls for the same mount node share one in-flight mount so only one Card Element is created.
+  if (mount && pendingMount && pendingMount.mount === mount) return pendingMount.promise;
+
+  const promise = mountCheckoutCardNow(publishableKey, mount);
+  if (!mount) return promise;
+  const entry = { mount, promise };
+  pendingMount = entry;
+  const clear = () => {
+    if (pendingMount === entry) pendingMount = null;
+  };
+  promise.then(clear, clear);
+  return promise;
+}
+
+let pendingMount = null;
+
+async function mountCheckoutCardNow(publishableKey, mount) {
   if (!mount) {
     unmountCardElement();
     return null;
@@ -74,6 +91,8 @@ async function mountCheckoutCard(publishableKey) {
     return null;
   }
   const stripe = await getStripe(publishableKey);
+  // A re-render may have replaced the node while Stripe loaded; the newer call mounts onto the live one.
+  if (!mount.isConnected) return cardElement;
   const elements = stripe.elements();
   cardElement = elements.create("card", {
     style: {
@@ -117,15 +136,39 @@ async function createCardPaymentMethod(publishableKey, billingDetails = {}) {
 
 /**
  * Confirms the PaymentIntent after initiate. Handles 3D Secure when Stripe requires it.
+ * When `retryWithCard` is set, the PaymentIntent is being confirmed again after a failure, which
+ * detaches its card, so the card currently typed into the Card Element is used instead.
  */
-async function confirmCardPayment(publishableKey, clientSecret) {
+async function confirmCardPayment(
+  publishableKey,
+  clientSecret,
+  { retryWithCard = false, billingDetails = {} } = {}
+) {
   if (!clientSecret) return null;
   const stripe = await getStripe(publishableKey);
-  const result = await stripe.confirmCardPayment(clientSecret);
+  let paymentMethod;
+  if (retryWithCard) {
+    if (!cardElement) await mountCheckoutCard(publishableKey);
+    if (!cardElement || !cardComplete) throw new Error("Enter your card details to try again.");
+    paymentMethod = { payment_method: { card: cardElement, billing_details: billingDetails } };
+  }
+  const result = await stripe.confirmCardPayment(clientSecret, paymentMethod);
   if (result.error) {
     throw new Error(result.error.message || "Payment could not be confirmed. Try again.");
   }
   return result.paymentIntent;
+}
+
+/**
+ * Reads where a PaymentIntent stands, so a resumed checkout knows whether the card was already
+ * charged (`requires_capture` or `succeeded`) or still has to be entered.
+ * @returns {Promise<string>} the PaymentIntent status
+ */
+async function getPaymentIntentStatus(publishableKey, clientSecret) {
+  const stripe = await getStripe(publishableKey);
+  const result = await stripe.retrievePaymentIntent(clientSecret);
+  if (result.error) throw new Error(result.error.message || "Could not check that payment. Try again.");
+  return result.paymentIntent.status;
 }
 
 document.addEventListener("app:render", () => {
@@ -133,5 +176,9 @@ document.addEventListener("app:render", () => {
     unmountCardElement();
     const mount = document.querySelector("#stripe-card-element");
     if (mount) delete mount.dataset.stripeMounted;
+    // Leaving checkout abandons an unpaid order, so the next visit enters a card again instead of
+    // silently reusing the one from before. A charged order is kept until it is confirmed.
+    const pending = state.pendingCheckout;
+    if (pending && !pending.paid && !pending.busy) state.pendingCheckout = null;
   }
 });

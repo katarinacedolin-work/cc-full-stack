@@ -11,10 +11,19 @@ const { httpError } = require('../auth/httpError');
 exports.getPayouts = async (req, res) => {
   const tokenStore = createCookieTokenStore(req, res);
   const sdk = getSdk(req, res, tokenStore);
-  let user;
+  let stripeAccount;
   try {
     const response = await sdk.currentUser.show({ include: ['stripeAccount'] });
-    user = response.data.data;
+    const user = response.data.data;
+    const included = response.data.included || [];
+    // The SDK does not inline included resources; resolve the relationship manually.
+    const accountRef = user?.relationships?.stripeAccount?.data;
+    const accountId = accountRef?.id?.uuid || accountRef?.id;
+    stripeAccount = accountId
+      ? included.find(
+          r => r.type === 'stripeAccount' && (r.id?.uuid || r.id) === accountId
+        ) || accountRef
+      : null;
   } catch (e) {
     if (e.status === 401 || e.status === 403) {
       throw httpError(401, 'sign-in-required', 'Sign in to continue.');
@@ -22,7 +31,6 @@ exports.getPayouts = async (req, res) => {
     throw e;
   }
 
-  const stripeAccount = user.stripeAccount;
   const attrs = stripeAccount?.attributes || {};
   const stripeConnected = Boolean(stripeAccount?.id);
   const chargesEnabled = Boolean(
