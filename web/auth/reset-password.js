@@ -11,7 +11,7 @@
   }
 
   main.innerHTML = `<h1>Choose a new password</h1>
-    <p class="muted">For ${email}</p>
+    <p class="muted" id="reset-email"></p>
     <form id="reset-form">
       <div class="field">
         <label for="password">New password</label>
@@ -20,6 +20,9 @@
       <button class="primary-button" type="submit">Save password</button>
       <p class="auth-error" id="reset-error" hidden></p>
     </form>`;
+
+  // The address can carry any string in `e`. Text, not HTML, so it cannot run script.
+  document.querySelector("#reset-email").textContent = `For ${email}`;
 
   const form = document.querySelector("#reset-form");
   const errorEl = document.querySelector("#reset-error");

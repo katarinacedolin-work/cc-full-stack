@@ -11,6 +11,7 @@ const {
 } = require('../../api-util/cookieOptions');
 const { httpError } = require('../auth/httpError');
 const { createRateLimiter } = require('../auth/rateLimit');
+const { emailForGoogleSignup } = require('../auth/googleSignupEmail');
 const { isSdsuEmail, normalizeEmail } = require('../auth/sdsu');
 const { toSession } = require('../auth/sessionUser');
 
@@ -237,26 +238,44 @@ exports.confirmPasswordReset = async (req, res) => {
  * POST /api/cc/verify-email
  * Body: { token }
  * The token comes from Sharetribe's email link: /verify-email?t=…
+ *
+ * currentUser.verifyEmail only succeeds for the signed-in user the token was
+ * issued to. A mail app or another device has no session, and Sharetribe then
+ * answers 403, the same status as an invalid token. Ask for sign-in first.
  */
 exports.verifyEmail = async (req, res) => {
-  const token = req.body?.token;
+  const token = typeof req.body?.token === 'string' ? req.body.token.trim() : '';
   if (!token) {
     throw httpError(400, 'token-required', 'Open the verification link from your email.');
+  }
+
+  const user = await loadCurrentUser(req, res);
+  if (!user) {
+    throw httpError(
+      401,
+      'auth-required',
+      'Sign in to verify this email. This link stays valid after you sign in.'
+    );
   }
 
   const sdk = getSdk(req, res);
   try {
     await sdk.currentUser.verifyEmail({ verificationToken: token });
   } catch (e) {
+    const reported = e?.data?.errors?.[0];
+    const title = reported?.title;
+    const genericStatus = !title || /^(forbidden|unauthorized)$/i.test(title);
     throw httpError(
       e.status || 400,
       'verify-failed',
-      sharetribeMessage(e, 'That verification link is invalid or has expired.')
+      (!genericStatus && title) ||
+        reported?.detail ||
+        'That verification link is invalid, has expired, or belongs to a different account.'
     );
   }
 
-  const user = await loadCurrentUser(req, res);
-  res.json({ session: toSession(user) });
+  const verified = await loadCurrentUser(req, res);
+  res.json({ session: toSession(verified) });
 };
 
 /**
@@ -279,8 +298,11 @@ exports.resendVerification = async (req, res) => {
 
 /**
  * POST /api/cc/signup-with-google
- * Body: { firstName, lastName, privateData? }
+ * Body: { firstName, lastName, acceptTerms: true }
  * Uses the pending Google cookies set by /api/auth/google/callback.
+ * The marketplace email is the address in the verified Google ID token.
+ * `st-authinfo` is not httpOnly, so its email is not the mailbox that gets created.
+ * Terms are recorded only after the caller agrees, and the timestamp comes from the server.
  */
 exports.signupWithGoogle = async (req, res) => {
   enforceLimit(signupLimiter, req);
@@ -289,26 +311,26 @@ exports.signupWithGoogle = async (req, res) => {
   if (!idpToken || authInfo?.idpId !== 'google') {
     throw httpError(400, 'google-session-expired', 'Start again with Continue with Google.');
   }
-  if (!isSdsuEmail(authInfo.email)) {
-    throw httpError(
-      400,
-      'sdsu-email-required',
-      'Use a Google account registered with your @sdsu.edu email.'
-    );
-  }
   if (!GOOGLE_CLIENT_ID) {
     throw httpError(500, 'google-not-configured', 'Google sign-in is not configured.');
   }
+
+  // Sharetribe copies the token's verified-email flag only when this email
+  // matches the token. A different address would still bind the Google subject.
+  const email = await emailForGoogleSignup(idpToken, GOOGLE_CLIENT_ID, authInfo.email);
 
   const firstName = String(req.body?.firstName || authInfo.firstName || '').trim();
   const lastName = String(req.body?.lastName || authInfo.lastName || '').trim();
   if (!firstName || !lastName) {
     throw httpError(400, 'name-required', 'Add your first and last name.');
   }
+  if (req.body?.acceptTerms !== true) {
+    throw httpError(400, 'terms-required', 'Agree to the Terms and Privacy Policy to continue.');
+  }
 
   const privateData = {
-    termsAcceptedAt: req.body?.privateData?.termsAcceptedAt || new Date().toISOString(),
-    termsVersion: req.body?.privateData?.termsVersion || TERMS_VERSION,
+    termsAcceptedAt: new Date().toISOString(),
+    termsVersion: TERMS_VERSION,
   };
 
   const tokenStore = sharetribeSdk.tokenStore.expressCookieStore({
@@ -331,7 +353,7 @@ exports.signupWithGoogle = async (req, res) => {
       idpId: 'google',
       idpClientId: GOOGLE_CLIENT_ID,
       idpToken,
-      email: normalizeEmail(authInfo.email),
+      email,
       firstName,
       lastName,
       privateData,

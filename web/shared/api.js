@@ -723,7 +723,7 @@ const api = (() => {
 
   /* Every endpoint is async and copies what goes in and what comes out, the way a request would. */
   const copy = (value) => (value === undefined ? undefined : structuredClone(value));
-  const remote = Object.fromEntries(Object.entries(endpoints).map(([name, endpoint]) => [name, async (...args) => copy(endpoint(...copy(args)))]));
+  const remote = Object.fromEntries(Object.entries(endpoints).map(([name, endpoint]) => [name, async (...args) => copy(await endpoint(...copy(args)))]));
 
   return {
     ...remote,
