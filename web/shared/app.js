@@ -117,7 +117,7 @@ Object.assign(ACTIONS, {
   "go-home": () => navigate(HOME_VIEW),
   "switch-mode": () => {
     api.keepDemoData();
-    location.href = IS_SELLER ? "index.html" : "seller.html";
+    location.href = IS_SELLER ? "/" : "/sell";
   },
   reload: () => location.reload(),
   "close-modal": () => closeModal(),
@@ -128,7 +128,7 @@ Object.assign(ACTIONS, {
   "sign-out": () => openSignOutModal(),
   "confirm-sign-out": async () => {
     await api.signOut();
-    location.href = "index.html";
+    location.href = "/";
   },
 
   "toggle-notifications": () => toggleNotifications(!state.notificationsOpen),
@@ -226,6 +226,6 @@ async function start() {
   document.dispatchEvent(new CustomEvent("app:ready"));
 }
 
-/* An old link format: index.html#seller opened the Seller Hub. */
-if (!IS_SELLER && location.hash === "#seller") location.replace("seller.html");
+/* An old link format: /#seller opened the Seller Hub. */
+if (!IS_SELLER && location.hash === "#seller") location.replace("/sell");
 else start();
