@@ -69,6 +69,40 @@ describe('approveSdsuUsers', () => {
     });
   });
 
+  it('does not deny permissions that are already denied', async () => {
+    await approveSdsuUsers(
+      event('user/updated', {
+        email: 'student@gmail.com',
+        emailVerified: true,
+        state: 'active',
+        permissions: {
+          postListings: 'permission/deny',
+          initiateTransactions: 'permission/deny',
+        },
+      })
+    );
+    expect(sdk.users.updatePermissions).not.toHaveBeenCalled();
+  });
+
+  it('denies the permission that is still allowed after the email leaves SDSU', async () => {
+    await approveSdsuUsers(
+      event('user/updated', {
+        email: 'student@gmail.com',
+        emailVerified: true,
+        state: 'active',
+        permissions: {
+          postListings: 'permission/allow',
+          initiateTransactions: 'permission/deny',
+        },
+      })
+    );
+    expect(sdk.users.updatePermissions).toHaveBeenCalledWith({
+      id: { uuid: 'user-1' },
+      postListings: 'permission/deny',
+      initiateTransactions: 'permission/deny',
+    });
+  });
+
   it('restores permissions when an active user returns to a verified SDSU email', async () => {
     await approveSdsuUsers(
       event('user/email_verified', {

@@ -20,10 +20,13 @@ const USER_EVENTS = new Set([
 const DENY = 'permission/deny';
 const ALLOW = 'permission/allow';
 
-// Only write when a permission is still denied. Granting an allow that is already
-// set would emit another user event and keep this worker looping.
+// Only write when the stored permissions would actually change. A redundant
+// updatePermissions call emits another user/updated event and keeps this worker looping.
 const listingOrOrdersDenied = permissions =>
   permissions?.postListings === DENY || permissions?.initiateTransactions === DENY;
+
+const listingAndOrdersDenied = permissions =>
+  permissions?.postListings === DENY && permissions?.initiateTransactions === DENY;
 
 /**
  * @param {Object} event Sharetribe event resource
@@ -56,7 +59,11 @@ module.exports = async event => {
     return;
   }
 
-  if (!isSdsuEmail(email) && state === 'active') {
+  if (
+    !isSdsuEmail(email) &&
+    state === 'active' &&
+    !listingAndOrdersDenied(user.attributes?.permissions)
+  ) {
     try {
       await sdk.users.updatePermissions({
         id: user.id,
