@@ -1,4 +1,8 @@
-const { isRelativePath, buildMarketplaceRedirectUrl } = require('./url');
+const {
+  isRelativePath,
+  buildMarketplaceRedirectUrl,
+  guardOAuthRedirectFragment,
+} = require('./url');
 
 const ROOT_URL = 'https://marketplace.example.com';
 
@@ -42,5 +46,22 @@ describe('buildMarketplaceRedirectUrl()', () => {
 
   it('returns a relative path when root URL is missing', () => {
     expect(buildMarketplaceRedirectUrl('', '/login')).toBe('/login');
+  });
+});
+
+describe('guardOAuthRedirectFragment()', () => {
+  it('adds a trailing hash when the redirect has no fragment', () => {
+    expect(guardOAuthRedirectFragment('https://marketplace.example.com/confirm')).toBe(
+      'https://marketplace.example.com/confirm#'
+    );
+    expect(guardOAuthRedirectFragment('https://marketplace.example.com/')).toBe(
+      'https://marketplace.example.com/#'
+    );
+  });
+
+  it('leaves hash routes unchanged so the confirm screen can match them', () => {
+    const confirmUrl = 'https://marketplace.example.com/#/auth/google-confirm';
+    expect(guardOAuthRedirectFragment(confirmUrl)).toBe(confirmUrl);
+    expect(guardOAuthRedirectFragment('/#/auth/google-confirm')).toBe('/#/auth/google-confirm');
   });
 });

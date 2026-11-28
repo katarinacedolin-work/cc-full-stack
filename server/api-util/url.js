@@ -28,7 +28,19 @@ const buildMarketplaceRedirectUrl = (rootUrl, path, fallback = '/') => {
   return `${base}${safePath}`;
 };
 
+/**
+ * Facebook appends `#_=_` to OAuth redirects that have no fragment, which
+ * breaks client routing. A trailing `#` blocks that. URLs that already have a
+ * fragment (hash routes such as `/#/auth/google-confirm`) stay unchanged —
+ * another `#` would become part of the fragment and fail an exact hash match.
+ *
+ * @param {string} url
+ * @returns {string}
+ */
+const guardOAuthRedirectFragment = url => (String(url).includes('#') ? url : `${url}#`);
+
 module.exports = {
   isRelativePath,
   buildMarketplaceRedirectUrl,
+  guardOAuthRedirectFragment,
 };

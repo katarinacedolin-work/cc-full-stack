@@ -216,7 +216,11 @@ document.addEventListener("keydown", (event) => {
 async function start() {
   hydrateStaticIcons();
   try {
-    await load(...(IS_SELLER ? SELLER_DATA : BUYER_DATA));
+    await load("session");
+    const gated = await gateAuth();
+    if (!gated) {
+      await load(...(IS_SELLER ? SELLER_DATA : BUYER_DATA).filter((key) => key !== "session"));
+    }
   } catch (error) {
     console.error(error);
     document.querySelector("#app-main").innerHTML = `<div class="empty-state"><div class="empty-shape">⌁</div><h3>Campus Connect could not load.</h3><p class="muted">${escapeHtml(error.message)}</p><button class="primary-button" data-action="reload">Try again</button></div>`;

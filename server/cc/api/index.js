@@ -7,12 +7,24 @@
 
 const express = require('express');
 const log = require('../../log');
+const asyncHandler = require('./asyncHandler');
+const auth = require('./auth');
 
 const router = express.Router();
 
 router.use(express.json());
 
-// ================ Endpoints ================ //
+// ================ Auth ================ //
+
+router.get('/session', asyncHandler(auth.getSession));
+router.post('/signup', asyncHandler(auth.signup));
+router.post('/login', asyncHandler(auth.login));
+router.post('/logout', asyncHandler(auth.logout));
+router.post('/password-reset/request', asyncHandler(auth.requestPasswordReset));
+router.post('/password-reset/confirm', asyncHandler(auth.confirmPasswordReset));
+router.post('/verify-email', asyncHandler(auth.verifyEmail));
+router.post('/resend-verification', asyncHandler(auth.resendVerification));
+router.post('/signup-with-google', asyncHandler(auth.signupWithGoogle));
 
 // ================ Fallbacks ================ //
 
@@ -23,14 +35,20 @@ router.use((req, res) => {
 // Express recognizes an error handler by its four arguments.
 // eslint-disable-next-line no-unused-vars
 router.use((err, req, res, next) => {
-  const isRequestProblem = err.status >= 400 && err.status < 500;
-  if (!isRequestProblem) {
+  // httpError() always sets both status and code. Keep those messages, including 503.
+  const known = Number.isInteger(err.status) && err.status >= 400 && Boolean(err.code);
+  if (!known || err.status >= 500) {
     log.error(err, 'cc-api-request-failed', { path: req.path });
   }
-  const error = isRequestProblem
-    ? { code: err.code || 'bad-request', message: err.message }
-    : { code: 'server-error', message: 'Something went wrong on our side. Please try again.' };
-  res.status(isRequestProblem ? err.status : 500).json({ error });
+  if (known) {
+    res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+  res
+    .status(500)
+    .json({
+      error: { code: 'server-error', message: 'Something went wrong on our side. Please try again.' },
+    });
 });
 
 module.exports = router;

@@ -19,7 +19,6 @@ const deleteAccount = require('./api/delete-account');
 
 const createUserWithIdp = require('./api/auth/createUserWithIdp');
 
-const { authenticateFacebook, authenticateFacebookCallback } = require('./api/auth/facebook');
 const { authenticateGoogle, authenticateGoogleCallback } = require('./api/auth/google');
 
 const router = express.Router();
@@ -62,19 +61,9 @@ router.post('/delete-account', deleteAccount);
 // they want to continue with the data fetched from IdP (e.g. name and email)
 router.post('/auth/create-user-with-idp', createUserWithIdp);
 
-// Facebook authentication endpoints
+// Google authentication endpoints (SDSU @sdsu.edu only; see server/api/auth/google.js)
 
-// This endpoint is called when user wants to initiate authenticaiton with Facebook
-router.get('/auth/facebook', authenticateFacebook);
-
-// This is the route for callback URL the user is redirected after authenticating
-// with Facebook. In this route a Passport.js custom callback is used for calling
-// loginWithIdp endpoint in Sharetribe Auth API to authenticate user to the marketplace
-router.get('/auth/facebook/callback', authenticateFacebookCallback);
-
-// Google authentication endpoints
-
-// This endpoint is called when user wants to initiate authenticaiton with Google
+// This endpoint is called when user wants to initiate authentication with Google
 router.get('/auth/google', authenticateGoogle);
 
 // This is the route for callback URL the user is redirected after authenticating

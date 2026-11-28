@@ -231,11 +231,49 @@ const api = (() => {
 
   /* ---------- Endpoints ---------- */
 
-  const endpoints = {
-    /* Session */
+  async function ccFetch(path, options = {}) {
+    const response = await fetch(`/api/cc${path}`, {
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+      ...options,
+      body: options.body != null ? JSON.stringify(options.body) : undefined
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      fail(payload?.error?.message || "Something went wrong. Please try again.");
+    }
+    return payload;
+  }
 
-    getSession: () => ({ userId: me().id }),
-    signOut: () => sessionStorage.removeItem(HANDOFF_KEY),
+  const endpoints = {
+    /* Session — these hit the real /api/cc auth routes. Everything else is still mock for now. */
+
+    getSession: async () => {
+      const { session } = await ccFetch("/session");
+      return session || { userId: "" };
+    },
+    signOut: async () => {
+      sessionStorage.removeItem(HANDOFF_KEY);
+      try {
+        await ccFetch("/logout", { method: "POST", body: {} });
+      } catch {
+        // Already signed out is fine.
+      }
+    },
+    signup: async (fields) => {
+      const { session } = await ccFetch("/signup", { method: "POST", body: fields });
+      return session;
+    },
+    login: async (fields) => {
+      const { session } = await ccFetch("/login", { method: "POST", body: fields });
+      return session;
+    },
+    signupWithGoogle: async (fields) => {
+      const { session } = await ccFetch("/signup-with-google", { method: "POST", body: fields });
+      return session;
+    },
+    requestPasswordReset: (email) => ccFetch("/password-reset/request", { method: "POST", body: { email } }),
+    resendVerification: () => ccFetch("/resend-verification", { method: "POST", body: {} }),
 
     /* Catalog */
 
@@ -674,7 +712,7 @@ const api = (() => {
 
   /* Every endpoint is async and copies what goes in and what comes out, the way a request would. */
   const copy = (value) => (value === undefined ? undefined : structuredClone(value));
-  const remote = Object.fromEntries(Object.entries(endpoints).map(([name, endpoint]) => [name, async (...args) => copy(endpoint(...copy(args)))]));
+  const remote = Object.fromEntries(Object.entries(endpoints).map(([name, endpoint]) => [name, async (...args) => copy(await endpoint(...copy(args)))]));
 
   return {
     ...remote,
