@@ -8,6 +8,19 @@ const update = (changes) => (target) => {
   render();
 };
 
+/** Names one checkout (listing, slot and quantity), so a retry can find the order it already started. */
+const checkoutKeyFor = (listingId, date, time, quantity) => [listingId, date || "", time || "", quantity].join("|");
+
+/** Loads the public Stripe settings the first time checkout needs them. */
+async function ensureConfig() {
+  if (state.config) return;
+  try {
+    state.config = await api.getConfig();
+  } catch {
+    state.config = {};
+  }
+}
+
 const STORE_PAGE_DEFAULTS = { storeTab: "shop", storeCollection: "All", storeQuery: "", storeKind: "all" };
 const ACCOUNT_SETTING_LABELS = { notifyMessages: "Message notifications", notifyOrders: "Order notifications", notifyHousing: "Housing & subleases", profileVisible: "Profile visibility", showCampus: "Campus on your profile" };
 
@@ -34,6 +47,36 @@ async function openConversation(about) {
   const conversation = await api.openConversation(about);
   await load("conversations");
   setView("inbox", { selectedConversationId: conversation.id });
+}
+
+function openOrderProblemModal(orderId) {
+  renderModal(`<div class="eyebrow">Report a problem</div><h2>What went wrong?</h2>
+    <p class="muted">We hold the payout while support looks at this. Pick a reason and add a short note.</p>
+    <form data-form="submit-order-problem" data-id="${escapeHtml(orderId)}">
+      <div class="field"><label for="order-problem-reason">Reason</label><select id="order-problem-reason" name="reason" required>
+        <option value="did-not-receive">I did not get it</option>
+        <option value="not-as-described">Not as described</option>
+        <option value="other">Something else</option>
+      </select></div>
+      <div class="field"><label for="order-problem-message">What should we know?</label><textarea id="order-problem-message" name="message" required placeholder="A short note helps support resolve this faster."></textarea></div>
+      <div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="danger-button" type="submit">Report problem</button></div>
+    </form>`);
+}
+
+function openOrderReviewModal(orderId) {
+  renderModal(`<div class="eyebrow">Leave a review</div><h2>How did it go?</h2>
+    <p class="muted">Reviews are public and tied to this completed order.</p>
+    <form data-form="order-review" data-id="${escapeHtml(orderId)}">
+      <div class="field"><label for="order-review-rating">Rating</label><select id="order-review-rating" name="rating" required>
+        <option value="5">5 · Excellent</option>
+        <option value="4">4 · Good</option>
+        <option value="3">3 · Okay</option>
+        <option value="2">2 · Poor</option>
+        <option value="1">1 · Bad</option>
+      </select></div>
+      <div class="field"><label for="order-review-content">Review (optional)</label><textarea id="order-review-content" name="content" placeholder="What should other students know?"></textarea></div>
+      <div class="modal-actions"><button class="ghost-button" type="button" data-action="close-modal">Cancel</button><button class="primary-button" type="submit">Submit review ${icon("star")}</button></div>
+    </form>`);
 }
 
 /* ---------- Actions ---------- */
@@ -80,15 +123,149 @@ Object.assign(ACTIONS, {
   },
   "increase-quantity": update(() => ({ quantity: Math.max(1, Math.min(getListing(state.selectedListingId).quantityAvailable, state.quantity + 1)) })),
   "decrease-quantity": update(() => ({ quantity: Math.max(1, state.quantity - 1) })),
-  "start-checkout": (target) => setView("checkout", { selectedListingId: target.dataset.id }),
-  "back-from-checkout": () => setView("listing"),
+  "start-checkout": async (target) => {
+    const listingId = target.dataset.id;
+    const listing = getListing(listingId);
+    if (listing?.kind === "service" && !(state.booking?.date && state.booking?.time)) {
+      throw new Error("Pick a date and time first.");
+    }
+    await ensureConfig();
+    let checkoutEstimate = null;
+    try {
+      checkoutEstimate = await api.estimateOrder({
+        listingId,
+        date: state.booking?.date,
+        time: state.booking?.time,
+        quantity: state.quantity
+      });
+    } catch {
+      checkoutEstimate = null;
+    }
+    // setView re-renders, and render() mounts the Stripe card itself; mounting here too would race it.
+    setView("checkout", { selectedListingId: listingId, checkoutEstimate, checkoutFromOrder: null });
+  },
+  "back-from-checkout": () => {
+    unmountCardElement();
+    if (state.checkoutFromOrder) {
+      return setView("order", { selectedOrderId: state.checkoutFromOrder, checkoutFromOrder: null, checkoutEstimate: null });
+    }
+    setView("listing", { checkoutEstimate: null });
+  },
+  /**
+   * Finishes paying for an order that was started but not paid, for example after a reload. The
+   * order and its PaymentIntent already exist, so this never starts a second charge.
+   */
+  "resume-payment": async (target) => {
+    const { order, clientSecret } = await api.getOrderForPayment(target.dataset.id);
+    if (order.status !== "pending-payment") {
+      await refresh("orders");
+      return setView("order", { selectedOrderId: order.id });
+    }
+    await ensureConfig();
+    const publishableKey = state.config?.stripePublishableKey;
+    if (!publishableKey) throw new Error("Checkout is not configured yet. Add a Stripe publishable key.");
+    if (!clientSecret) throw new Error("This payment cannot be resumed. Start a new order from the listing.");
+
+    const intentStatus = await getPaymentIntentStatus(publishableKey, clientSecret);
+    if (intentStatus === "requires_capture" || intentStatus === "succeeded") {
+      // The card was already charged and only the order was left unconfirmed, so no card is needed.
+      const confirmed = await api.confirmOrderPayment(order.id);
+      if (state.pendingCheckout?.transactionId === order.id) state.pendingCheckout = null;
+      await load("orders", "listings");
+      setView("order", { selectedOrderId: confirmed.id });
+      showToast("Payment received. Your order is in.");
+      return;
+    }
+    if (intentStatus === "processing") throw new Error("Your payment is still processing. Check back in a moment.");
+    if (intentStatus === "canceled") {
+      await refresh("orders");
+      throw new Error("This payment expired. Start a new order from the listing.");
+    }
+
+    if (!getListing(order.listingId)) throw new Error("That listing is no longer available.");
+    const quantity = order.quantity || 1;
+    // The card from the first attempt is not usable any more, so it has to be entered again.
+    state.pendingCheckout = {
+      key: checkoutKeyFor(order.listingId, order.date, order.time, quantity),
+      transactionId: order.id,
+      clientSecret,
+      attempted: true,
+      paid: false
+    };
+    setView("checkout", {
+      selectedListingId: order.listingId,
+      quantity,
+      booking: order.date ? { date: order.date, time: order.time } : null,
+      checkoutEstimate: { payinTotal: order.total },
+      checkoutFromOrder: order.id
+    });
+  },
   "confirm-order": async (target) => {
+    const listingId = target.dataset.id;
+    const publishableKey = state.config?.stripePublishableKey;
+    if (!publishableKey) throw new Error("Checkout is not configured yet. Add a Stripe publishable key.");
+
+    const billingDetails = {
+      name: data.account.displayName || undefined,
+      email: data.session.email || undefined
+    };
     const { date, time } = state.booking || {};
-    const order = await api.placeOrder({ listingId: target.dataset.id, date, time, quantity: state.quantity });
+    const checkoutKey = checkoutKeyFor(listingId, date, time, state.quantity);
+
+    // A charged order that was never confirmed has to be finished before buying anything else.
+    if (state.pendingCheckout?.paid && state.pendingCheckout.key !== checkoutKey) {
+      throw new Error(
+        "You already paid for another order that is not confirmed yet. Finish that checkout first."
+      );
+    }
+
+    // A failed attempt leaves its order waiting for payment. Retrying the same checkout finishes
+    // that order instead of starting a second one, so the buyer is never charged twice.
+    let pending = state.pendingCheckout?.key === checkoutKey ? state.pendingCheckout : null;
+    if (!pending) {
+      const paymentMethodId = await createCardPaymentMethod(publishableKey, billingDetails);
+      const payload = await api.placeOrder({
+        listingId,
+        date,
+        time,
+        quantity: state.quantity,
+        paymentMethodId
+      });
+      pending = {
+        key: checkoutKey,
+        transactionId: payload.transactionId || payload.order?.id,
+        clientSecret: payload.clientSecret || null,
+        attempted: false,
+        paid: !payload.clientSecret
+      };
+      state.pendingCheckout = pending;
+    }
+    if (!pending.paid) {
+      const retryWithCard = pending.attempted;
+      pending.attempted = true;
+      pending.busy = true;
+      try {
+        await confirmCardPayment(publishableKey, pending.clientSecret, { retryWithCard, billingDetails });
+        pending.paid = true;
+      } finally {
+        pending.busy = false;
+      }
+    }
+    const order = await api.confirmOrderPayment(pending.transactionId);
+    state.pendingCheckout = null;
+    unmountCardElement();
     await load("orders", "listings");
-    setView("order", { selectedOrderId: order.id });
+    setView("order", { selectedOrderId: order.id, checkoutEstimate: null, checkoutFromOrder: null });
+    showToast("Payment received. Your order is in.");
   },
   "open-order": (target) => setView("order", { selectedOrderId: target.dataset.id }),
+  "got-it": async (target) => {
+    await api.confirmOrderReceived(target.dataset.id);
+    await refresh("orders", "notifications");
+    showToast("Marked as received. Thanks for confirming.");
+  },
+  "report-order-problem": (target) => openOrderProblemModal(target.dataset.id),
+  "open-order-review": (target) => openOrderReviewModal(target.dataset.id),
 
   /* Sellers and stores */
 
@@ -234,6 +411,32 @@ Object.assign(FORMS, {
     const method = await api.addPaymentMethod(fields);
     await refresh("paymentMethods");
     showToast(`${method.brand} ending in ${method.last4} saved for this session.`);
+  },
+
+  "submit-order-problem": async (fields, form) => {
+    const order = data.orders.find((entry) => entry.id === form.dataset.id);
+    if (order?.kind === "product") {
+      await api.reportOrderProblem(form.dataset.id, fields);
+    } else {
+      // Services and tickets have no dispute transition; file a support case until the reports table lands.
+      await api.createSupportCase({
+        topic: `Order problem · ${fields.reason}`,
+        message: `Order ${form.dataset.id}: ${fields.message}`
+      });
+    }
+    closeModal();
+    await refresh("orders", "notifications");
+    showToast("Problem reported. Support will follow up from this order.");
+  },
+
+  "order-review": async (fields, form) => {
+    await api.submitOrderReview(form.dataset.id, {
+      rating: Number(fields.rating),
+      content: fields.content
+    });
+    closeModal();
+    await refresh("orders", "notifications");
+    showToast("Thanks for the review.");
   },
 
   "publish-listing": async (fields) => {

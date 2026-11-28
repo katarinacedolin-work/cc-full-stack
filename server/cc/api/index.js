@@ -12,6 +12,9 @@ const auth = require('./auth');
 const listings = require('./listings');
 const images = require('./images');
 const stores = require('./stores');
+const orders = require('./orders');
+const config = require('./config');
+const payouts = require('./payouts');
 
 const router = express.Router();
 
@@ -49,6 +52,19 @@ router.post(
 router.get('/stores', asyncHandler(stores.list));
 router.get('/stores/:id', asyncHandler(stores.show));
 router.put('/stores/:id', asyncHandler(stores.upsert));
+
+// ================ Orders and payouts ================ //
+
+router.get('/config', asyncHandler(config.getConfig));
+router.get('/orders', asyncHandler(orders.list));
+router.post('/orders', asyncHandler(orders.create));
+router.post('/orders/line-items', asyncHandler(orders.lineItems));
+router.get('/orders/:id', asyncHandler(orders.show));
+router.post('/orders/:id/confirm-payment', asyncHandler(orders.confirmPayment));
+router.post('/orders/:id/ready-for-pickup', asyncHandler(orders.readyForPickup));
+router.post('/orders/:id/actions/:action', asyncHandler(orders.action));
+router.post('/orders/:id/operator/:action', asyncHandler(orders.operatorAction));
+router.get('/payouts', asyncHandler(payouts.getPayouts));
 
 // ================ Fallbacks ================ //
 

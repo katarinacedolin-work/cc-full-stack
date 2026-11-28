@@ -17,6 +17,12 @@ function render() {
   updateChrome();
   document.querySelectorAll(".chat-messages").forEach((thread) => { thread.scrollTop = thread.scrollHeight; });
   document.dispatchEvent(new CustomEvent("app:render"));
+  if (state.view === "checkout" && typeof mountCheckoutCard === "function") {
+    mountCheckoutCard(state.config?.stripePublishableKey).catch((error) => {
+      const errors = document.querySelector("#stripe-card-errors");
+      if (errors) errors.textContent = error.message;
+    });
+  }
 }
 
 /** The header: which link is current, the unread badges, the avatar and the notification popover. */
